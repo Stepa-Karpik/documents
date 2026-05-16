@@ -46,3 +46,11 @@ class DocumentOrchestrator:
         )
         self.ai_client.create_job(document_id=document.id, content_ref=asset_id)
         return document
+
+
+    def complete_analysis(self, *, document_id: str, summary: str, entities: list[str]) -> None:
+        document = self.repository.get_document(document_id)
+        assert document is not None
+        self.repository.attach_analysis(document_id=document_id, summary=summary, entities=entities)
+        text = " ".join([document.filename, summary, *entities])
+        self.search_client.index_document(document_id=document_id, owner_subject_id=document.owner_subject_id, text=text)

@@ -48,3 +48,14 @@ def test_managed_document_registration_orchestrates_asset_and_ai_job():
     document = DocumentOrchestrator(repo, files_client=files, ai_client=ai, search_client=search).register_managed_document(owner_subject_id='usr_1', filename='contract.pdf', content_type='application/pdf')
     assert document.storage_mode == 'managed'
     assert ai.calls[0]['content_ref'] == 'asset_m1'
+
+
+def test_completed_analysis_is_indexed_in_search_service():
+    engine = create_engine('sqlite+pysqlite:///:memory:')
+    Base.metadata.create_all(engine)
+    repo = DocumentRepository(Session(engine))
+    document = repo.create_managed_document(owner_subject_id='usr_1', filename='lease.pdf', content_type='application/pdf')
+    files = FakeFilesClient(); ai = FakeAiClient(); search = FakeSearchClient()
+    DocumentOrchestrator(repo, files_client=files, ai_client=ai, search_client=search).complete_analysis(document_id=document.id, summary='Договор аренды', entities=['аренда'])
+    assert search.calls[0]['document_id'] == document.id
+    assert 'аренда' in search.calls[0]['text']
