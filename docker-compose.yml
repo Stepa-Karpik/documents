@@ -1,0 +1,49 @@
+services:
+  postgres:
+    image: postgres:15
+    environment:
+      POSTGRES_DB: documents
+      POSTGRES_USER: documents
+      POSTGRES_PASSWORD: documents
+    ports:
+      - "127.0.0.1:5542:5432"
+  redis:
+    image: redis:7
+    ports:
+      - "127.0.0.1:6382:6379"
+  migrator:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    env_file:
+      - .env
+    command: ["alembic", "upgrade", "head"]
+    depends_on:
+      - postgres
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    env_file:
+      - .env
+    depends_on:
+      - migrator
+    ports:
+      - "127.0.0.1:8200:8200"
+  onlyoffice-document-server:
+    image: onlyoffice/documentserver:latest
+    environment:
+      JWT_ENABLED: "true"
+      JWT_SECRET: ${ONLYOFFICE_JWT_SECRET:-change-me}
+    ports:
+      - "127.0.0.1:8088:80"
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    environment:
+      NEXT_PUBLIC_DOCUMENTS_API_BASE_URL: ${NEXT_PUBLIC_DOCUMENTS_API_BASE_URL:-http://localhost:8200}
+    ports:
+      - "127.0.0.1:3200:3000"
