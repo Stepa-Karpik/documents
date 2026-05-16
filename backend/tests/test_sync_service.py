@@ -26,3 +26,11 @@ def test_sync_batch_reports_created_unchanged_and_updated():
     assert [item.action for item in first] == ['created']
     assert [item.action for item in second] == ['unchanged', 'created']
     assert [item.action for item in third] == ['updated']
+
+
+def test_sync_service_can_use_discovery_callback_for_new_files():
+    service, source = make_service()
+    seen=[]
+    service.on_discovered=lambda snapshot: seen.append(snapshot.external_file_id)
+    service.sync(source.id,[ExternalFileSnapshot('disk_1','invoice.docx','rev_1')])
+    assert seen==['disk_1']

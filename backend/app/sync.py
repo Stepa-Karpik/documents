@@ -11,16 +11,20 @@ class ExternalFileSnapshot:
 
 
 class WatchedFolderSyncService:
-    def __init__(self, repository: DocumentRepository):
+    def __init__(self, repository: DocumentRepository, on_discovered=None):
         self.repository = repository
+        self.on_discovered = on_discovered
 
     def sync(self, source_id: str, snapshots: list[ExternalFileSnapshot]) -> list[SyncResult]:
-        return [
-            self.repository.ingest_watched_file(
+        results: list[SyncResult] = []
+        for snapshot in snapshots:
+            result = self.repository.ingest_watched_file(
                 source_id=source_id,
                 external_file_id=snapshot.external_file_id,
                 filename=snapshot.filename,
                 revision=snapshot.revision,
             )
-            for snapshot in snapshots
-        ]
+            if result.action in {'created', 'updated'} and self.on_discovered is not None:
+                self.on_discovered(snapshot)
+            results.append(result)
+        return results
