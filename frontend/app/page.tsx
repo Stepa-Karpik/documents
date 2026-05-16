@@ -15,6 +15,7 @@ import {
 } from "lucide-react"
 
 const API_BASE = process.env.NEXT_PUBLIC_DOCUMENTS_API_BASE_URL || "http://localhost:8200"
+const FILES_API_BASE = process.env.NEXT_PUBLIC_FILES_API_BASE_URL || "http://localhost:8320"
 
 const nav = [
   [Clock3, "Последние"],
@@ -44,6 +45,7 @@ export default function Home() {
   const [query, setQuery] = useState("")
   const [hits, setHits] = useState<SearchHit[]>([])
   const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [uploading, setUploading] = useState(false)
 
   useEffect(() => {
     fetch(`${API_BASE}/api/v1/auth/session`, { credentials: "include" })
@@ -52,15 +54,16 @@ export default function Home() {
       .catch(() => setSubjectId(null))
   }, [])
 
+  async function loadDocuments(activeSubjectId: string) {
+    const response = await fetch(`${API_BASE}/api/v1/documents?owner_subject_id=${activeSubjectId}`, { credentials: "include" })
+    const items: DocumentItem[] = await response.json()
+    setDocuments(items)
+    setSelectedId((current) => current ?? items[0]?.id ?? null)
+  }
+
   useEffect(() => {
     if (!subjectId) return
-    fetch(`${API_BASE}/api/v1/documents?owner_subject_id=${subjectId}`, { credentials: "include" })
-      .then((response) => response.json())
-      .then((items: DocumentItem[]) => {
-        setDocuments(items)
-        setSelectedId(items[0]?.id ?? null)
-      })
-      .catch(() => setDocuments([]))
+    loadDocuments(subjectId).catch(() => setDocuments([]))
   }, [subjectId])
 
   const visibleDocuments = useMemo(() => {
@@ -70,6 +73,23 @@ export default function Home() {
   }, [documents, hits])
 
   const selected = documents.find((document) => document.id === selectedId)
+
+  async function uploadManaged(file: File) {
+    if (!subjectId) return
+    setUploading(true)
+    const form = new FormData()
+    form.append("owner_subject_id", subjectId)
+    form.append("file", file)
+    await fetch(`${FILES_API_BASE}/api/v1/uploads/managed`, { method: "POST", body: form, credentials: "include" })
+    await fetch(`${API_BASE}/api/v1/documents/managed`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ owner_subject_id: subjectId, filename: file.name, content_type: file.type || "application/octet-stream" }),
+      credentials: "include",
+    })
+    await loadDocuments(subjectId)
+    setUploading(false)
+  }
 
   async function runSearch() {
     if (!query.trim()) {
@@ -92,7 +112,10 @@ export default function Home() {
       <section className="content">
         <header className="hero">
           <div><p>Умный архив</p><h1>Найдите документ по смыслу, а не по названию.</h1></div>
-          <label className="searchbox"><ScanSearch size={18} /><input value={query} onChange={(event) => setQuery(event.target.value)} onKeyDown={(event) => event.key === "Enter" && runSearch()} placeholder="найди договор, где был залог 2000 евро" /></label>
+          <div className="hero-actions">
+            <label className="upload-button">{uploading ? "Загрузка..." : "Загрузить файл"}<input type="file" onChange={(event) => event.target.files?.[0] && uploadManaged(event.target.files[0])} /></label>
+            <label className="searchbox"><ScanSearch size={18} /><input value={query} onChange={(event) => setQuery(event.target.value)} onKeyDown={(event) => event.key === "Enter" && runSearch()} placeholder="найди договор, где был залог 2000 евро" /></label>
+          </div>
         </header>
         <section className="document-grid">
           {visibleDocuments.map((document) => (

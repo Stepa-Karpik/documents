@@ -87,3 +87,7 @@ nav a.active { background: var(--ink); color: #fff; }
 .searchbox input { border: 0; outline: 0; background: transparent; width: 100%; font: inherit; color: inherit; }
 .doc-card { text-align: left; cursor: pointer; }
 .empty-state { padding: 28px; color: var(--muted); }
+
+.hero-actions { display: grid; gap: 10px; }
+.upload-button { display:inline-flex; justify-content:center; border-radius:999px; padding:12px 16px; background: var(--ink); color:#fff; cursor:pointer; }
+.upload-button input { display:none; }
