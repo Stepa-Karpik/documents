@@ -16,6 +16,7 @@ import {
 
 const API_BASE = process.env.NEXT_PUBLIC_DOCUMENTS_API_BASE_URL || "http://localhost:8200"
 const FILES_API_BASE = process.env.NEXT_PUBLIC_FILES_API_BASE_URL || "http://localhost:8320"
+const INTEGRATIONS_API_BASE = process.env.NEXT_PUBLIC_INTEGRATIONS_API_BASE_URL || "http://localhost:8310"
 
 const nav = [
   [Clock3, "Последние"],
@@ -93,6 +94,16 @@ export default function Home() {
     setUploading(false)
   }
 
+  async function connectWatchedFolder() {
+    if (!subjectId) return
+    await fetch(`${INTEGRATIONS_API_BASE}/api/v1/watched-sources`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ owner_subject_id: subjectId, provider: "yandex_disk", root_path: watchedPath }),
+      credentials: "include",
+    })
+  }
+
   async function runSearch() {
     if (!query.trim()) {
       setHits([])
@@ -115,7 +126,10 @@ export default function Home() {
             <option value="managed">Хранить у нас</option>
             <option value="yandex_disk">Мой Яндекс Диск</option>
           </select>
-          {storageMode === "yandex_disk" && <input value={watchedPath} onChange={(event) => setWatchedPath(event.target.value)} placeholder="/Docs" />}
+          {storageMode === "yandex_disk" && <>
+            <input value={watchedPath} onChange={(event) => setWatchedPath(event.target.value)} placeholder="/Docs" />
+            <button onClick={connectWatchedFolder}>Подключить папку</button>
+          </>}
         </section>
       </aside>
 
