@@ -66,7 +66,11 @@ def test_external_discovery_and_search_api():
     assert search.json()[0]["document_id"] == document_id
 
 
-def test_batch_sync_api_reports_file_actions():
+def test_batch_sync_api_reports_file_actions(monkeypatch):
+    class FakeOrchestrator:
+        def register_external_document(self, **payload):
+            return None
+    monkeypatch.setattr('app.main._build_orchestrator', lambda repo: FakeOrchestrator())
     client = make_client()
     source = client.post('/api/v1/watched-sources', json={'owner_subject_id': 'usr_sync', 'provider': 'yandex_disk', 'root_path': '/Docs'})
     source_id = source.json()['id']

@@ -11,6 +11,8 @@ from app.db import get_session
 from app.domain import DocumentService
 from app.identity_client import HttpIdentityClient
 from app.planner_client import HttpPlannerClient
+from app.orchestration import DocumentOrchestrator
+from app.platform_clients import HttpAiClient, HttpFilesClient, HttpSearchClient
 from app.repositories import DocumentRepository
 from app.sync import ExternalFileSnapshot, WatchedFolderSyncService
 
@@ -75,6 +77,15 @@ def _build_identity_client() -> HttpIdentityClient:
     return HttpIdentityClient(base_url=os.getenv("IDENTITY_BASE_URL", "http://identity:8300"))
 
 
+def _build_orchestrator(repo: DocumentRepository) -> DocumentOrchestrator:
+    return DocumentOrchestrator(
+        repo,
+        files_client=HttpFilesClient(base_url=os.getenv("FILES_BASE_URL", "http://files:8320")),
+        ai_client=HttpAiClient(base_url=os.getenv("AI_RUNTIME_BASE_URL", "http://ai-runtime:8330")),
+        search_client=HttpSearchClient(base_url=os.getenv("SEARCH_KNOWLEDGE_BASE_URL", "http://search-knowledge:8340")),
+    )
+
+
 @app.get("/healthz")
 def healthz() -> dict[str, str]:
     return {"status": "ok", "service": "documents"}
@@ -128,7 +139,19 @@ def ingest_watched_file(source_id: str, payload: WatchedFileIngest, session: Ses
 @app.post("/api/v1/watched-sources/{source_id}/sync")
 def sync_watched_source(source_id: str, payload: WatchedSyncBatch, session: SessionDep) -> list[dict]:
     snapshots = [ExternalFileSnapshot(**item.model_dump()) for item in payload.files]
-    results = WatchedFolderSyncService(DocumentRepository(session)).sync(source_id, snapshots)
+    repo = DocumentRepository(session)
+    orchestrator = _build_orchestrator(repo)
+    source = repo.get_watched_source(source_id)
+    results = WatchedFolderSyncService(
+        repo,
+        on_discovered=lambda snapshot: orchestrator.register_external_document(
+            owner_subject_id=source.owner_subject_id,
+            provider=source.provider,
+            external_file_id=snapshot.external_file_id,
+            filename=snapshot.filename,
+            revision=snapshot.revision,
+        ),
+    ).sync(source_id, snapshots)
     return [asdict(result) for result in results]
 
 
