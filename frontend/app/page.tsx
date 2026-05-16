@@ -46,6 +46,8 @@ export default function Home() {
   const [hits, setHits] = useState<SearchHit[]>([])
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [uploading, setUploading] = useState(false)
+  const [storageMode, setStorageMode] = useState<"managed" | "yandex_disk">("managed")
+  const [watchedPath, setWatchedPath] = useState("/Docs")
 
   useEffect(() => {
     fetch(`${API_BASE}/api/v1/auth/session`, { credentials: "include" })
@@ -107,6 +109,14 @@ export default function Home() {
         <div className="brand"><div className="brand-mark">D</div><div><strong>Documents</strong><span>digital vault</span></div></div>
         <nav>{nav.map(([Icon, label], index) => <a className={index === 0 ? "active" : ""} href="#" key={label}><Icon size={17} />{label}</a>)}</nav>
         <section className="storage-card"><span>Аккаунт</span><strong>{subjectId ?? "Нужен вход"}</strong><small>Managed + Яндекс Диск</small></section>
+        <section className="integration-card">
+          <span>Режим хранения</span>
+          <select value={storageMode} onChange={(event) => setStorageMode(event.target.value as "managed" | "yandex_disk")}>
+            <option value="managed">Хранить у нас</option>
+            <option value="yandex_disk">Мой Яндекс Диск</option>
+          </select>
+          {storageMode === "yandex_disk" && <input value={watchedPath} onChange={(event) => setWatchedPath(event.target.value)} placeholder="/Docs" />}
+        </section>
       </aside>
 
       <section className="content">
