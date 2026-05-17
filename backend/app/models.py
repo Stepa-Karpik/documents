@@ -25,6 +25,7 @@ class DocumentModel(Base):
     content_type: Mapped[str | None] = mapped_column(String(255), nullable=True)
     provider: Mapped[str | None] = mapped_column(String(64), nullable=True)
     external_file_id: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    external_path: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     revision: Mapped[str | None] = mapped_column(String(255), nullable=True)
     preview_status: Mapped[str] = mapped_column(String(32), default="queued")
     analysis_status: Mapped[str] = mapped_column(String(32), default="queued")

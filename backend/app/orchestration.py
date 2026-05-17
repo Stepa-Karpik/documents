@@ -38,11 +38,12 @@ class DocumentOrchestrator:
         self.ai_client.create_job(document_id=document.id, content_ref=asset_id)
         return document
 
-    def register_external_document(self, *, owner_subject_id: str, provider: str, external_file_id: str, filename: str, revision: str) -> DocumentModel:
+    def register_external_document(self, *, owner_subject_id: str, provider: str, external_file_id: str, external_path: str | None, filename: str, revision: str) -> DocumentModel:
         document = self.repository.upsert_external_document(
             owner_subject_id=owner_subject_id,
             provider=provider,
             external_file_id=external_file_id,
+            external_path=external_path,
             filename=filename,
             revision=revision,
         )
@@ -50,6 +51,7 @@ class DocumentOrchestrator:
             owner_subject_id=owner_subject_id,
             provider=provider,
             external_file_id=external_file_id,
+            external_path=external_path,
             revision=revision,
         )
         document = self.repository.assign_asset(document.id, asset_id=asset_id)

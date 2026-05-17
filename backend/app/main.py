@@ -40,6 +40,7 @@ class ExternalDocumentDiscover(BaseModel):
     owner_subject_id: str
     provider: str
     external_file_id: str
+    external_path: str | None = None
     filename: str
     revision: str
 
@@ -54,6 +55,7 @@ class WatchedFileIngest(BaseModel):
     external_file_id: str
     filename: str
     revision: str
+    external_path: str | None = None
 
 
 class WatchedSyncBatch(BaseModel):
@@ -181,6 +183,7 @@ def sync_watched_source(source_id: str, payload: WatchedSyncBatch, session: Sess
             owner_subject_id=source.owner_subject_id,
             provider=source.provider,
             external_file_id=snapshot.external_file_id,
+            external_path=snapshot.external_path,
             filename=snapshot.filename,
             revision=snapshot.revision,
         ),
@@ -224,6 +227,7 @@ def _document_to_dict(document) -> dict:
         "content_type": document.content_type,
         "provider": document.provider,
         "external_file_id": document.external_file_id,
+        "external_path": getattr(document, "external_path", None),
         "revision": document.revision,
         "preview_status": document.preview_status,
         "analysis_status": document.analysis_status,

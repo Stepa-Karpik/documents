@@ -32,10 +32,11 @@ def test_external_document_registration_orchestrates_asset_and_ai_job():
     repo = DocumentRepository(Session(engine))
     files = FakeFilesClient(); ai = FakeAiClient(); search = FakeSearchClient()
     orchestrator = DocumentOrchestrator(repo, files_client=files, ai_client=ai, search_client=search)
-    document = orchestrator.register_external_document(owner_subject_id='usr_1', provider='yandex_disk', external_file_id='disk_1', filename='invoice.docx', revision='rev_1')
+    document = orchestrator.register_external_document(owner_subject_id='usr_1', provider='yandex_disk', external_file_id='disk_1', external_path='disk:/Docs/invoice.docx', filename='invoice.docx', revision='rev_1')
     assert document.id
     assert document.asset_id == 'asset_1'
     assert files.calls[0]['external_file_id'] == 'disk_1'
+    assert files.calls[0]['external_path'] == 'disk:/Docs/invoice.docx'
     assert ai.calls[0]['content_ref'] == 'asset_1'
 
 

@@ -40,7 +40,7 @@ class DocumentRepository:
         stmt = select(DocumentModel).where(DocumentModel.owner_subject_id == owner_subject_id).order_by(DocumentModel.created_at.desc())
         return list(self.session.scalars(stmt).all())
 
-    def upsert_external_document(self, *, owner_subject_id: str, provider: str, external_file_id: str, filename: str, revision: str) -> DocumentModel:
+    def upsert_external_document(self, *, owner_subject_id: str, provider: str, external_file_id: str, filename: str, revision: str, external_path: str | None = None) -> DocumentModel:
         stmt = select(DocumentModel).where(
             DocumentModel.owner_subject_id == owner_subject_id,
             DocumentModel.provider == provider,
@@ -48,10 +48,11 @@ class DocumentRepository:
         )
         document = self.session.scalar(stmt)
         if document is None:
-            document = DocumentModel(owner_subject_id=owner_subject_id, filename=filename, storage_mode="external", provider=provider, external_file_id=external_file_id, revision=revision)
+            document = DocumentModel(owner_subject_id=owner_subject_id, filename=filename, storage_mode="external", provider=provider, external_file_id=external_file_id, external_path=external_path, revision=revision)
             self.session.add(document)
         elif document.revision != revision:
             document.filename = filename
+            document.external_path = external_path
             document.revision = revision
             document.preview_status = "queued"
             document.analysis_status = "queued"
@@ -72,7 +73,7 @@ class DocumentRepository:
         assert source is not None
         return source
 
-    def ingest_watched_file(self, *, source_id: str, external_file_id: str, filename: str, revision: str) -> SyncResult:
+    def ingest_watched_file(self, *, source_id: str, external_file_id: str, filename: str, revision: str, external_path: str | None = None) -> SyncResult:
         source = self.session.get(WatchedSourceModel, source_id)
         assert source is not None
         stmt = select(DocumentModel).where(
@@ -82,7 +83,7 @@ class DocumentRepository:
         )
         existing = self.session.scalar(stmt)
         previous_revision = existing.revision if existing else None
-        document = self.upsert_external_document(owner_subject_id=source.owner_subject_id, provider=source.provider, external_file_id=external_file_id, filename=filename, revision=revision)
+        document = self.upsert_external_document(owner_subject_id=source.owner_subject_id, provider=source.provider, external_file_id=external_file_id, filename=filename, revision=revision, external_path=external_path)
         if existing is None:
             action = "created"
         elif previous_revision == revision:

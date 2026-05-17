@@ -8,6 +8,7 @@ class ExternalFileSnapshot:
     external_file_id: str
     filename: str
     revision: str
+    external_path: str | None = None
 
 
 class WatchedFolderSyncService:
@@ -23,6 +24,7 @@ class WatchedFolderSyncService:
                 external_file_id=snapshot.external_file_id,
                 filename=snapshot.filename,
                 revision=snapshot.revision,
+                external_path=snapshot.external_path,
             )
             if result.action in {'created', 'updated'} and self.on_discovered is not None:
                 self.on_discovered(snapshot)
