@@ -168,12 +168,24 @@ export default function Home() {
 
   async function connectWatchedFolder() {
     if (!subjectId) return
+    const connectionsResponse = await fetch(`${INTEGRATIONS_API_BASE}/api/v1/connections?owner_subject_id=${subjectId}`, { credentials: "include" })
+    const connections: { id: string; provider: string }[] = connectionsResponse.ok ? await connectionsResponse.json() : []
+    const yandexConnection = connections.find((connection) => connection.provider === "yandex_disk")
+    if (!yandexConnection) return
     await fetch(`${INTEGRATIONS_API_BASE}/api/v1/watched-sources`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ owner_subject_id: subjectId, provider: "yandex_disk", root_path: watchedPath }),
+      body: JSON.stringify({ owner_subject_id: subjectId, provider: "yandex_disk", root_path: watchedPath, connection_id: yandexConnection.id }),
       credentials: "include",
     })
+  }
+
+  async function connectYandexDisk() {
+    if (!subjectId) return
+    const response = await fetch(`${INTEGRATIONS_API_BASE}/api/v1/oauth/yandex-disk/authorize?owner_subject_id=${subjectId}`, { credentials: "include" })
+    if (!response.ok) return
+    const payload: { authorization_url: string } = await response.json()
+    window.location.href = payload.authorization_url
   }
 
   async function runSearch() {
@@ -199,6 +211,7 @@ export default function Home() {
             <option value="yandex_disk">Мой Яндекс Диск</option>
           </select>
           {storageMode === "yandex_disk" && <>
+            <button onClick={connectYandexDisk}>Подключить Яндекс Диск</button>
             <input value={watchedPath} onChange={(event) => setWatchedPath(event.target.value)} placeholder="/Docs" />
             <button onClick={connectWatchedFolder}>Подключить папку</button>
           </>}
