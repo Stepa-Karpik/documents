@@ -31,6 +31,10 @@ services:
       - migrator
     ports:
       - "127.0.0.1:8200:8200"
+    networks:
+      default:
+      ecosystem:
+        aliases: [documents]
   onlyoffice-document-server:
     image: onlyoffice/documentserver:latest
     environment:
@@ -47,3 +51,7 @@ services:
       NEXT_PUBLIC_DOCUMENTS_API_BASE_URL: ${NEXT_PUBLIC_DOCUMENTS_API_BASE_URL:-http://localhost:8200}
     ports:
       - "127.0.0.1:3200:3000"
+
+networks:
+  ecosystem:
+    external: true
