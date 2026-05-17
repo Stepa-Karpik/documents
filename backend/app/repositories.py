@@ -25,6 +25,14 @@ class DocumentRepository:
         self.session.refresh(document)
         return document
 
+    def assign_asset(self, document_id: str, *, asset_id: str) -> DocumentModel:
+        document = self.get_document(document_id)
+        assert document is not None
+        document.asset_id = asset_id
+        self.session.commit()
+        self.session.refresh(document)
+        return document
+
     def get_document(self, document_id: str) -> DocumentModel | None:
         return self.session.get(DocumentModel, document_id)
 
@@ -129,6 +137,13 @@ class DocumentRepository(DocumentRepository):
         self.session.commit()
         self.session.refresh(proposal)
         return proposal
+
+    def list_event_proposals(self, document_id: str) -> list[EventProposalModel]:
+        return list(
+            self.session.scalars(
+                select(EventProposalModel).where(EventProposalModel.document_id == document_id)
+            ).all()
+        )
 
     def get_event_proposal(self, proposal_id: str) -> EventProposalModel:
         proposal = self.session.get(EventProposalModel, proposal_id)

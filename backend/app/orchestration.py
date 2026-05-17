@@ -15,6 +15,7 @@ class AiClient(Protocol):
 
 class SearchClient(Protocol):
     def index_document(self, **payload: str) -> None: ...
+    def index_entities(self, **payload: str) -> None: ...
 
 
 class DocumentOrchestrator:
@@ -27,6 +28,13 @@ class DocumentOrchestrator:
     def register_managed_document(self, *, owner_subject_id: str, filename: str, content_type: str) -> DocumentModel:
         document = self.repository.create_managed_document(owner_subject_id=owner_subject_id, filename=filename, content_type=content_type)
         asset_id = self.files_client.register_managed_asset(owner_subject_id=owner_subject_id, filename=filename, content_type=content_type)
+        document = self.repository.assign_asset(document.id, asset_id=asset_id)
+        self.ai_client.create_job(document_id=document.id, content_ref=asset_id)
+        return document
+
+    def register_uploaded_managed_document(self, *, owner_subject_id: str, filename: str, content_type: str, asset_id: str) -> DocumentModel:
+        document = self.repository.create_managed_document(owner_subject_id=owner_subject_id, filename=filename, content_type=content_type)
+        document = self.repository.assign_asset(document.id, asset_id=asset_id)
         self.ai_client.create_job(document_id=document.id, content_ref=asset_id)
         return document
 
@@ -44,6 +52,7 @@ class DocumentOrchestrator:
             external_file_id=external_file_id,
             revision=revision,
         )
+        document = self.repository.assign_asset(document.id, asset_id=asset_id)
         self.ai_client.create_job(document_id=document.id, content_ref=asset_id)
         return document
 
@@ -54,3 +63,8 @@ class DocumentOrchestrator:
         self.repository.attach_analysis(document_id=document_id, summary=summary, entities=entities)
         text = " ".join([document.filename, summary, *entities])
         self.search_client.index_document(document_id=document_id, owner_subject_id=document.owner_subject_id, text=text)
+        self.search_client.index_entities(
+            document_id=document_id,
+            owner_subject_id=document.owner_subject_id,
+            entities=[{"kind": "topic", "name": entity} for entity in entities],
+        )

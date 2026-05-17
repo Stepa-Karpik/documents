@@ -16,3 +16,9 @@ class PreviewOrchestrator:
         document = self.repository.get_document(document_id)
         assert document is not None
         return self.files_client.create_preview(asset_id=asset_id, filename=document.filename)
+
+    def request_linked_preview(self, document_id: str) -> str:
+        document = self.repository.get_document(document_id)
+        assert document is not None
+        assert document.asset_id is not None
+        return self.request_preview(document_id, asset_id=document.asset_id)

@@ -21,6 +21,7 @@ class DocumentModel(Base):
     owner_subject_id: Mapped[str] = mapped_column(String(128), index=True)
     filename: Mapped[str] = mapped_column(String(512))
     storage_mode: Mapped[str] = mapped_column(String(32))
+    asset_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     content_type: Mapped[str | None] = mapped_column(String(255), nullable=True)
     provider: Mapped[str | None] = mapped_column(String(64), nullable=True)
     external_file_id: Mapped[str | None] = mapped_column(String(512), nullable=True)

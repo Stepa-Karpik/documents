@@ -40,3 +40,14 @@ class HttpSearchClient(_BaseHttpClient):
         with httpx.Client(base_url=self.base_url, transport=self.transport) as client:
             response = client.post('/api/v1/index', json=payload)
             response.raise_for_status()
+
+    def index_entities(self, **payload: str) -> None:
+        with httpx.Client(base_url=self.base_url, transport=self.transport) as client:
+            response = client.post('/api/v1/entities/index', json=payload)
+            response.raise_for_status()
+
+    def list_groups(self, *, owner_subject_id: str):
+        with httpx.Client(base_url=self.base_url, transport=self.transport) as client:
+            response = client.get('/api/v1/groups', params={'owner_subject_id': owner_subject_id})
+            response.raise_for_status()
+            return response.json()

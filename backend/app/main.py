@@ -13,6 +13,7 @@ from app.identity_client import HttpIdentityClient
 from app.planner_client import HttpPlannerClient
 from app.orchestration import DocumentOrchestrator
 from app.platform_clients import HttpAiClient, HttpFilesClient, HttpSearchClient
+from app.preview import PreviewOrchestrator
 from app.repositories import DocumentRepository
 from app.sync import ExternalFileSnapshot, WatchedFolderSyncService
 
@@ -32,6 +33,7 @@ class ManagedDocumentCreate(BaseModel):
     owner_subject_id: str
     filename: str
     content_type: str
+    asset_id: str | None = None
 
 
 class ExternalDocumentDiscover(BaseModel):
@@ -61,6 +63,13 @@ class WatchedSyncBatch(BaseModel):
 class AnalysisCreate(BaseModel):
     summary: str
     entities: list[str]
+    events: list["DetectedEventCreate"] = []
+
+
+class DetectedEventCreate(BaseModel):
+    title: str
+    starts_at: str
+    description: str | None = None
 
 
 class EventProposalCreate(BaseModel):
@@ -77,12 +86,23 @@ def _build_identity_client() -> HttpIdentityClient:
     return HttpIdentityClient(base_url=os.getenv("IDENTITY_BASE_URL", "http://identity:8300"))
 
 
+def _build_search_client() -> HttpSearchClient:
+    return HttpSearchClient(base_url=os.getenv("SEARCH_KNOWLEDGE_BASE_URL", "http://search-knowledge:8340"))
+
+
 def _build_orchestrator(repo: DocumentRepository) -> DocumentOrchestrator:
     return DocumentOrchestrator(
         repo,
         files_client=HttpFilesClient(base_url=os.getenv("FILES_BASE_URL", "http://files:8320")),
         ai_client=HttpAiClient(base_url=os.getenv("AI_RUNTIME_BASE_URL", "http://ai-runtime:8330")),
-        search_client=HttpSearchClient(base_url=os.getenv("SEARCH_KNOWLEDGE_BASE_URL", "http://search-knowledge:8340")),
+        search_client=_build_search_client(),
+    )
+
+
+def _build_preview_orchestrator(repo: DocumentRepository) -> PreviewOrchestrator:
+    return PreviewOrchestrator(
+        repo,
+        HttpFilesClient(base_url=os.getenv("FILES_BASE_URL", "http://files:8320")),
     )
 
 
@@ -101,7 +121,11 @@ def auth_session(ecosystem_session: str | None = Cookie(default=None)) -> dict:
 
 @app.post("/api/v1/documents/managed", status_code=status.HTTP_201_CREATED)
 def register_managed_document(payload: ManagedDocumentCreate, session: SessionDep) -> dict:
-    document = DocumentRepository(session).create_managed_document(**payload.model_dump())
+    repo = DocumentRepository(session)
+    if payload.asset_id is not None:
+        document = _build_orchestrator(repo).register_uploaded_managed_document(**payload.model_dump())
+    else:
+        document = repo.create_managed_document(**payload.model_dump(exclude={"asset_id"}))
     return _document_to_dict(document)
 
 
@@ -116,6 +140,11 @@ def get_document(document_id: str, session: SessionDep) -> dict:
     if document is None:
         raise HTTPException(status_code=404, detail="document not found")
     return _document_to_dict(document)
+
+
+@app.post("/api/v1/documents/{document_id}/preview", status_code=status.HTTP_201_CREATED)
+def request_document_preview(document_id: str, session: SessionDep) -> dict:
+    return {"preview_id": _build_preview_orchestrator(DocumentRepository(session)).request_linked_preview(document_id)}
 
 
 @app.post("/api/v1/documents/external/discover", status_code=status.HTTP_201_CREATED)
@@ -157,13 +186,28 @@ def sync_watched_source(source_id: str, payload: WatchedSyncBatch, session: Sess
 
 @app.post("/api/v1/documents/{document_id}/analysis")
 def attach_analysis(document_id: str, payload: AnalysisCreate, session: SessionDep) -> dict:
-    record = DocumentRepository(session).attach_analysis(document_id=document_id, **payload.model_dump())
-    return {"document_id": record.document_id, "summary": record.summary, "entities_json": record.entities_json}
+    repo = DocumentRepository(session)
+    record = repo.attach_analysis(document_id=document_id, summary=payload.summary, entities=payload.entities)
+    proposals = [
+        repo.create_event_proposal(document_id=document_id, **event.model_dump())
+        for event in payload.events
+    ]
+    return {
+        "document_id": record.document_id,
+        "summary": record.summary,
+        "entities_json": record.entities_json,
+        "event_proposals": [_proposal_to_dict(proposal) for proposal in proposals],
+    }
 
 
 @app.get("/api/v1/search")
 def search(owner_subject_id: str, q: str, session: SessionDep) -> list[dict]:
     return [asdict(hit) for hit in DocumentRepository(session).search(owner_subject_id=owner_subject_id, query=q)]
+
+
+@app.get("/api/v1/groups")
+def list_groups(owner_subject_id: str) -> list[dict]:
+    return _build_search_client().list_groups(owner_subject_id=owner_subject_id)
 
 
 def _document_to_dict(document) -> dict:
@@ -172,6 +216,7 @@ def _document_to_dict(document) -> dict:
         "owner_subject_id": document.owner_subject_id,
         "filename": document.filename,
         "storage_mode": document.storage_mode,
+        "asset_id": document.asset_id,
         "content_type": document.content_type,
         "provider": document.provider,
         "external_file_id": document.external_file_id,
@@ -186,6 +231,11 @@ def _document_to_dict(document) -> dict:
 def create_event_proposal(document_id: str, payload: EventProposalCreate, session: SessionDep) -> dict:
     proposal = DocumentRepository(session).create_event_proposal(document_id=document_id, **payload.model_dump())
     return _proposal_to_dict(proposal)
+
+
+@app.get("/api/v1/documents/{document_id}/event-proposals")
+def list_event_proposals(document_id: str, session: SessionDep) -> list[dict]:
+    return [_proposal_to_dict(proposal) for proposal in DocumentRepository(session).list_event_proposals(document_id)]
 
 
 @app.post("/api/v1/event-proposals/{proposal_id}/confirm")

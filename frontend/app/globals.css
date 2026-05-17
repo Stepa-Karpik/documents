@@ -87,6 +87,51 @@ nav a.active { background: var(--ink); color: #fff; }
 .searchbox input { border: 0; outline: 0; background: transparent; width: 100%; font: inherit; color: inherit; }
 .doc-card { text-align: left; cursor: pointer; }
 .empty-state { padding: 28px; color: var(--muted); }
+.group-board {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 14px;
+  margin-top: 20px;
+}
+.group-board article {
+  border: 1px solid var(--line);
+  border-radius: 22px;
+  padding: 16px;
+  background: rgba(255, 252, 247, .64);
+}
+.group-board article > span {
+  display: block;
+  margin-bottom: 12px;
+  color: var(--muted);
+  font-size: 13px;
+}
+.group-board article > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.group-board button {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border: 0;
+  border-radius: 999px;
+  padding: 9px 12px;
+  background: rgba(31, 93, 77, .08);
+  color: var(--ink);
+  cursor: pointer;
+}
+.group-board em {
+  display: inline-grid;
+  place-items: center;
+  min-width: 19px;
+  min-height: 19px;
+  border-radius: 999px;
+  background: var(--ink);
+  color: #fff;
+  font-size: 11px;
+  font-style: normal;
+}
 
 .hero-actions { display: grid; gap: 10px; }
 .upload-button { display:inline-flex; justify-content:center; border-radius:999px; padding:12px 16px; background: var(--ink); color:#fff; cursor:pointer; }

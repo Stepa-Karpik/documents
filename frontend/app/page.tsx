@@ -34,17 +34,33 @@ type DocumentItem = {
   id: string
   filename: string
   storage_mode: "managed" | "external"
+  asset_id: string | null
   analysis_status: string
   preview_status: string
 }
 
 type SearchHit = { document_id: string; score: number }
+type Group = {
+  kind: string
+  title: string
+  items: { name: string; document_count: number }[]
+}
+type EventProposal = {
+  id: string
+  title: string
+  starts_at: string
+  description: string | null
+  confirmed: boolean
+}
 
 export default function Home() {
   const [subjectId, setSubjectId] = useState<string | null>(null)
   const [documents, setDocuments] = useState<DocumentItem[]>([])
   const [query, setQuery] = useState("")
   const [hits, setHits] = useState<SearchHit[]>([])
+  const [groups, setGroups] = useState<Group[]>([])
+  const [eventProposals, setEventProposals] = useState<EventProposal[]>([])
+  const [previewId, setPreviewId] = useState<string | null>(null)
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [uploading, setUploading] = useState(false)
   const [storageMode, setStorageMode] = useState<"managed" | "yandex_disk">("managed")
@@ -64,9 +80,16 @@ export default function Home() {
     setSelectedId((current) => current ?? items[0]?.id ?? null)
   }
 
+  async function loadGroups(activeSubjectId: string) {
+    const response = await fetch(`${API_BASE}/api/v1/groups?owner_subject_id=${activeSubjectId}`, { credentials: "include" })
+    if (!response.ok) return
+    setGroups(await response.json())
+  }
+
   useEffect(() => {
     if (!subjectId) return
     loadDocuments(subjectId).catch(() => setDocuments([]))
+    loadGroups(subjectId).catch(() => setGroups([]))
   }, [subjectId])
 
   const visibleDocuments = useMemo(() => {
@@ -77,17 +100,37 @@ export default function Home() {
 
   const selected = documents.find((document) => document.id === selectedId)
 
+  useEffect(() => {
+    if (!selectedId) return
+    fetch(`${API_BASE}/api/v1/documents/${selectedId}/event-proposals`, { credentials: "include" })
+      .then((response) => response.ok ? response.json() : [])
+      .then((items: EventProposal[]) => setEventProposals(items))
+      .catch(() => setEventProposals([]))
+  }, [selectedId])
+
+  useEffect(() => {
+    if (!selected?.asset_id) {
+      setPreviewId(null)
+      return
+    }
+    fetch(`${API_BASE}/api/v1/documents/${selected.id}/preview`, { method: "POST", credentials: "include" })
+      .then((response) => response.ok ? response.json() : Promise.reject())
+      .then((preview: { preview_id: string }) => setPreviewId(preview.preview_id))
+      .catch(() => setPreviewId(null))
+  }, [selected?.id, selected?.asset_id])
+
   async function uploadManaged(file: File) {
     if (!subjectId) return
     setUploading(true)
     const form = new FormData()
     form.append("owner_subject_id", subjectId)
     form.append("file", file)
-    await fetch(`${FILES_API_BASE}/api/v1/uploads/managed`, { method: "POST", body: form, credentials: "include" })
+    const uploadResponse = await fetch(`${FILES_API_BASE}/api/v1/uploads/managed`, { method: "POST", body: form, credentials: "include" })
+    const uploadedAsset: { asset_id: string } = await uploadResponse.json()
     await fetch(`${API_BASE}/api/v1/documents/managed`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ owner_subject_id: subjectId, filename: file.name, content_type: file.type || "application/octet-stream" }),
+      body: JSON.stringify({ owner_subject_id: subjectId, filename: file.name, content_type: file.type || "application/octet-stream", asset_id: uploadedAsset.asset_id }),
       credentials: "include",
     })
     await loadDocuments(subjectId)
@@ -152,12 +195,45 @@ export default function Home() {
           ))}
           {!visibleDocuments.length && <div className="empty-state">Документы пока не найдены.</div>}
         </section>
+        {!!groups.length && (
+          <section className="group-board">
+            {groups.map((group) => (
+              <article key={group.kind}>
+                <span>{group.title}</span>
+                <div>
+                  {group.items.map((item) => (
+                    <button key={item.name} type="button" onClick={() => setQuery(item.name)}>
+                      {item.name}
+                      <em>{item.document_count}</em>
+                    </button>
+                  ))}
+                </div>
+              </article>
+            ))}
+          </section>
+        )}
       </section>
 
       <aside className="inspector">
-        <div className="preview"><span>Предпросмотр</span><strong>{selected?.filename ?? "Выберите документ"}</strong></div>
+        <div className="preview">
+          <span>Предпросмотр</span>
+          <strong>{selected?.filename ?? "Выберите документ"}</strong>
+          {previewId && <small>Сессия: {previewId}</small>}
+        </div>
         <section><h2>Статус</h2><p>Preview: {selected?.preview_status ?? "—"}<br />Analysis: {selected?.analysis_status ?? "—"}</p></section>
         <section><h2>AI summary</h2><p>После обработки здесь появятся summary, сущности и найденные события.</p></section>
+        <section>
+          <h2>Найденные события</h2>
+          {!eventProposals.length && <p>Пока нет предложений из документа.</p>}
+          {eventProposals.map((proposal) => (
+            <article className="event-card" key={proposal.id}>
+              <strong>{proposal.title}</strong>
+              <span>{proposal.starts_at}</span>
+              {proposal.description && <p>{proposal.description}</p>}
+              <button>{proposal.confirmed ? "Добавлено" : "Открыть перед добавлением"}</button>
+            </article>
+          ))}
+        </section>
       </aside>
     </main>
   )
