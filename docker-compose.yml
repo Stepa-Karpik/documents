@@ -58,6 +58,11 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_DOCUMENTS_API_BASE_URL: ${NEXT_PUBLIC_DOCUMENTS_API_BASE_URL:-http://localhost:8200}
+        NEXT_PUBLIC_FILES_API_BASE_URL: ${NEXT_PUBLIC_FILES_API_BASE_URL:-http://localhost:8320}
+        NEXT_PUBLIC_INTEGRATIONS_API_BASE_URL: ${NEXT_PUBLIC_INTEGRATIONS_API_BASE_URL:-http://localhost:8310}
+        NEXT_PUBLIC_ONLYOFFICE_BASE_URL: ${NEXT_PUBLIC_ONLYOFFICE_BASE_URL:-http://localhost:8088}
     environment:
       NEXT_PUBLIC_DOCUMENTS_API_BASE_URL: ${NEXT_PUBLIC_DOCUMENTS_API_BASE_URL:-http://localhost:8200}
       NEXT_PUBLIC_FILES_API_BASE_URL: ${NEXT_PUBLIC_FILES_API_BASE_URL:-http://localhost:8320}
