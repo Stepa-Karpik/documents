@@ -52,6 +52,7 @@ type EventProposal = {
   starts_at: string
   description: string | null
   confirmed: boolean
+  priority?: string
 }
 type OnlyOfficeConfig = {
   document: { fileType: string; key: string; title: string; url: string }
@@ -250,16 +251,51 @@ export default function Home() {
           <h2>Найденные события</h2>
           {!eventProposals.length && <p>Пока нет предложений из документа.</p>}
           {eventProposals.map((proposal) => (
-            <article className="event-card" key={proposal.id}>
-              <strong>{proposal.title}</strong>
-              <span>{proposal.starts_at}</span>
-              {proposal.description && <p>{proposal.description}</p>}
-              <button>{proposal.confirmed ? "Добавлено" : "Открыть перед добавлением"}</button>
-            </article>
+            <EditableEventCard
+              key={proposal.id}
+              proposal={proposal}
+              onConfirmed={(updated) => setEventProposals((items) => items.map((item) => item.id === updated.id ? updated : item))}
+            />
           ))}
         </section>
       </aside>
     </main>
+  )
+}
+
+function EditableEventCard({ proposal, onConfirmed }: { proposal: EventProposal; onConfirmed: (proposal: EventProposal) => void }) {
+  const [title, setTitle] = useState(proposal.title)
+  const [startsAt, setStartsAt] = useState(proposal.starts_at)
+  const [description, setDescription] = useState(proposal.description ?? "")
+  const [priority, setPriority] = useState(proposal.priority ?? "normal")
+  const [saving, setSaving] = useState(false)
+
+  async function confirm() {
+    setSaving(true)
+    const response = await fetch(`${API_BASE}/api/v1/event-proposals/${proposal.id}/confirm`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "include",
+      body: JSON.stringify({ title, starts_at: startsAt, description, priority }),
+    })
+    if (response.ok) onConfirmed(await response.json())
+    setSaving(false)
+  }
+
+  return (
+    <article className="event-card">
+      <input value={title} onChange={(event) => setTitle(event.target.value)} />
+      <input value={startsAt} onChange={(event) => setStartsAt(event.target.value)} />
+      <textarea value={description} onChange={(event) => setDescription(event.target.value)} placeholder="Описание" />
+      <select value={priority} onChange={(event) => setPriority(event.target.value)}>
+        <option value="low">Низкий</option>
+        <option value="normal">Обычный</option>
+        <option value="high">Высокий</option>
+      </select>
+      <button disabled={proposal.confirmed || saving} onClick={confirm}>
+        {proposal.confirmed ? "Добавлено" : saving ? "Добавляем..." : "Добавить в календарь"}
+      </button>
+    </article>
   )
 }
 

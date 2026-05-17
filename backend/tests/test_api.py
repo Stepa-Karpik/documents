@@ -173,6 +173,44 @@ def test_event_proposal_api_can_be_created_and_confirmed():
     assert confirmed.json()['planner_event_id'] == 'evt_1'
 
 
+def test_event_proposal_can_be_edited_before_confirmation(monkeypatch):
+    client = make_client()
+    document = client.post(
+        "/api/v1/documents/managed",
+        json={"owner_subject_id": "usr_evt", "filename": "insurance.pdf", "content_type": "application/pdf"},
+    ).json()
+    proposal = client.post(
+        f"/api/v1/documents/{document['id']}/event-proposals",
+        json={"title": "Черновик", "starts_at": "2026-07-01T09:00:00+03:00"},
+    ).json()
+
+    class FakePlannerClient:
+        def __init__(self, **kwargs):
+            pass
+
+        def create_document_event(self, **payload):
+            assert payload["title"] == "Продлить страховку"
+            assert payload["starts_at"] == "2026-07-02T10:30:00+03:00"
+            assert payload["description"] == "Проверить условия"
+            assert payload["priority"] == "high"
+            return "evt_edited"
+
+    monkeypatch.setattr("app.main.HttpPlannerClient", FakePlannerClient)
+
+    confirmed = client.post(
+        f"/api/v1/event-proposals/{proposal['id']}/confirm",
+        json={
+            "title": "Продлить страховку",
+            "starts_at": "2026-07-02T10:30:00+03:00",
+            "description": "Проверить условия",
+            "priority": "high",
+        },
+    )
+    assert confirmed.status_code == 200
+    assert confirmed.json()["title"] == "Продлить страховку"
+    assert confirmed.json()["planner_event_id"] == "evt_edited"
+
+
 def test_list_documents_api_returns_user_documents():
     client = make_client()
     client.post('/api/v1/documents/managed', json={'owner_subject_id': 'usr_list', 'filename': 'a.pdf', 'content_type': 'application/pdf'})

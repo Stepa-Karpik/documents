@@ -158,3 +158,25 @@ class DocumentRepository(DocumentRepository):
         self.session.commit()
         self.session.refresh(proposal)
         return proposal
+
+    def update_event_proposal(
+        self,
+        proposal_id: str,
+        *,
+        title: str | None = None,
+        starts_at: str | None = None,
+        description: str | None = None,
+        priority: str | None = None,
+    ) -> EventProposalModel:
+        proposal = self.get_event_proposal(proposal_id)
+        if title is not None:
+            proposal.title = title
+        if starts_at is not None:
+            proposal.starts_at = starts_at
+        if description is not None:
+            proposal.description = description
+        if priority is not None:
+            proposal.priority = priority
+        self.session.commit()
+        self.session.refresh(proposal)
+        return proposal

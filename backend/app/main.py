@@ -80,6 +80,10 @@ class EventProposalCreate(BaseModel):
 
 class EventProposalConfirm(BaseModel):
     planner_event_id: str | None = None
+    title: str | None = None
+    starts_at: str | None = None
+    description: str | None = None
+    priority: str | None = None
 
 
 def _build_identity_client() -> HttpIdentityClient:
@@ -242,6 +246,14 @@ def list_event_proposals(document_id: str, session: SessionDep) -> list[dict]:
 def confirm_event_proposal(proposal_id: str, payload: EventProposalConfirm, session: SessionDep) -> dict:
     repo = DocumentRepository(session)
     proposal = repo.get_event_proposal(proposal_id)
+    if any(value is not None for value in (payload.title, payload.starts_at, payload.description, payload.priority)):
+        proposal = repo.update_event_proposal(
+            proposal_id,
+            title=payload.title,
+            starts_at=payload.starts_at,
+            description=payload.description,
+            priority=payload.priority,
+        )
     planner_event_id = payload.planner_event_id
     if planner_event_id is None:
         document = repo.get_document(proposal.document_id)
