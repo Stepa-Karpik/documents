@@ -109,6 +109,8 @@ def _analysis_corpus(document: DocumentModel, record: AnalysisRecordModel) -> st
 
 class DocumentRepository(DocumentRepository):
     def attach_analysis(self, *, document_id: str, summary: str, entities: list[str]) -> AnalysisRecordModel:
+        document = self.get_document(document_id)
+        assert document is not None
         record = self.session.get(AnalysisRecordModel, document_id)
         if record is None:
             record = AnalysisRecordModel(document_id=document_id, summary=summary, entities_json=json.dumps(entities, ensure_ascii=False))
@@ -116,6 +118,7 @@ class DocumentRepository(DocumentRepository):
         else:
             record.summary = summary
             record.entities_json = json.dumps(entities, ensure_ascii=False)
+        document.analysis_status = "ready"
         self.session.commit()
         self.session.refresh(record)
         return record

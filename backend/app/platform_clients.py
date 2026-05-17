@@ -26,6 +26,12 @@ class HttpFilesClient(_BaseHttpClient):
             response.raise_for_status()
             return response.json()['preview_id']
 
+    def download_asset_content(self, asset_id: str) -> bytes:
+        with httpx.Client(base_url=self.base_url, transport=self.transport) as client:
+            response = client.get(f'/api/v1/assets/{asset_id}/content')
+            response.raise_for_status()
+            return response.content
+
 
 class HttpAiClient(_BaseHttpClient):
     def create_job(self, **payload: str) -> str:
@@ -33,6 +39,12 @@ class HttpAiClient(_BaseHttpClient):
             response = client.post('/api/v1/jobs', json=payload)
             response.raise_for_status()
             return response.json()['job_id']
+
+    def analyze_content(self, **payload: str) -> dict:
+        with httpx.Client(base_url=self.base_url, transport=self.transport) as client:
+            response = client.post('/api/v1/analyze-content', json=payload)
+            response.raise_for_status()
+            return response.json()
 
 
 class HttpSearchClient(_BaseHttpClient):

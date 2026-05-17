@@ -54,6 +54,13 @@ type EventProposal = {
   confirmed: boolean
   priority?: string
 }
+type YandexStatus = {
+  credentials_configured: boolean
+  connected: boolean
+  watched_sources: { id: string; root_path: string }[]
+  last_sync_status: string | null
+  last_sync_at: string | null
+}
 type OnlyOfficeConfig = {
   document: { fileType: string; key: string; title: string; url: string }
   editorConfig: { mode: string }
@@ -82,12 +89,19 @@ export default function Home() {
   const [uploading, setUploading] = useState(false)
   const [storageMode, setStorageMode] = useState<"managed" | "yandex_disk">("managed")
   const [watchedPath, setWatchedPath] = useState("/Docs")
+  const [activeView, setActiveView] = useState<"documents" | "integrations">("documents")
+  const [yandexClientId, setYandexClientId] = useState("")
+  const [yandexClientSecret, setYandexClientSecret] = useState("")
+  const [yandexStatus, setYandexStatus] = useState<YandexStatus | null>(null)
 
   useEffect(() => {
     fetch(`${API_BASE}/api/v1/auth/session`, { credentials: "include" })
       .then((response) => response.ok ? response.json() : Promise.reject())
       .then((session: { subject_id: string }) => setSubjectId(session.subject_id))
-      .catch(() => setSubjectId(null))
+      .catch(() => {
+        const returnTo = encodeURIComponent(window.location.href)
+        window.location.href = `https://auth.nerior.ru/login?return_to=${returnTo}`
+      })
   }, [])
 
   async function loadDocuments(activeSubjectId: string) {
@@ -107,7 +121,13 @@ export default function Home() {
     if (!subjectId) return
     loadDocuments(subjectId).catch(() => setDocuments([]))
     loadGroups(subjectId).catch(() => setGroups([]))
+    loadYandexStatus(subjectId).catch(() => setYandexStatus(null))
   }, [subjectId])
+
+  async function loadYandexStatus(activeSubjectId: string) {
+    const response = await fetch(`${INTEGRATIONS_API_BASE}/api/v1/providers/yandex-disk/status?owner_subject_id=${activeSubjectId}`, { credentials: "include" })
+    if (response.ok) setYandexStatus(await response.json())
+  }
 
   const visibleDocuments = useMemo(() => {
     if (!hits.length) return documents
@@ -136,6 +156,17 @@ export default function Home() {
       .then((preview: { preview_id: string }) => setPreviewId(preview.preview_id))
       .catch(() => setPreviewId(null))
   }, [selected?.id, selected?.asset_id])
+
+  useEffect(() => {
+    if (!previewId) return
+    const heartbeat = window.setInterval(() => {
+      fetch(`${FILES_API_BASE}/api/v1/previews/${previewId}/heartbeat`, { method: "POST", credentials: "include" }).catch(() => undefined)
+    }, 30000)
+    return () => {
+      window.clearInterval(heartbeat)
+      fetch(`${FILES_API_BASE}/api/v1/previews/${previewId}/close`, { method: "POST", credentials: "include", keepalive: true }).catch(() => undefined)
+    }
+  }, [previewId])
 
   useEffect(() => {
     if (!previewId) {
@@ -178,6 +209,7 @@ export default function Home() {
       body: JSON.stringify({ owner_subject_id: subjectId, provider: "yandex_disk", root_path: watchedPath, connection_id: yandexConnection.id }),
       credentials: "include",
     })
+    await loadYandexStatus(subjectId)
   }
 
   async function connectYandexDisk() {
@@ -186,6 +218,18 @@ export default function Home() {
     if (!response.ok) return
     const payload: { authorization_url: string } = await response.json()
     window.location.href = payload.authorization_url
+  }
+
+  async function saveYandexCredentials() {
+    if (!subjectId) return
+    await fetch(`${INTEGRATIONS_API_BASE}/api/v1/providers/yandex-disk/credentials`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ owner_subject_id: subjectId, client_id: yandexClientId, client_secret: yandexClientSecret }),
+      credentials: "include",
+    })
+    setYandexClientSecret("")
+    await loadYandexStatus(subjectId)
   }
 
   async function runSearch() {
@@ -202,7 +246,7 @@ export default function Home() {
     <main className="workspace-shell">
       <aside className="sidebar">
         <div className="brand"><div className="brand-mark">D</div><div><strong>Documents</strong><span>digital vault</span></div></div>
-        <nav>{nav.map(([Icon, label], index) => <a className={index === 0 ? "active" : ""} href="#" key={label}><Icon size={17} />{label}</a>)}</nav>
+        <nav>{nav.map(([Icon, label], index) => <button className={(index === 0 && activeView === "documents") || (label === "Интеграции" && activeView === "integrations") ? "active" : ""} key={label} onClick={() => setActiveView(label === "Интеграции" ? "integrations" : "documents")}><Icon size={17} />{label}</button>)}</nav>
         <section className="storage-card"><span>Аккаунт</span><strong>{subjectId ?? "Нужен вход"}</strong><small>Managed + Яндекс Диск</small></section>
         <section className="integration-card">
           <span>Режим хранения</span>
@@ -219,6 +263,34 @@ export default function Home() {
       </aside>
 
       <section className="content">
+        {activeView === "integrations" ? (
+          <section className="integrations-screen">
+            <header><p>Интеграции</p><h1>Яндекс Диск</h1></header>
+            <article className="integration-panel">
+              <div className="status-row">
+                <strong>{yandexStatus?.connected ? "Подключён" : "Не подключён"}</strong>
+                <span>{yandexStatus?.credentials_configured ? "OAuth credentials настроены" : "Нужны client id и secret"}</span>
+              </div>
+              <label>Client ID<input value={yandexClientId} onChange={(event) => setYandexClientId(event.target.value)} placeholder="Введите client id" /></label>
+              <label>Client Secret<input type="password" value={yandexClientSecret} onChange={(event) => setYandexClientSecret(event.target.value)} placeholder="Введите client secret" /></label>
+              <div className="integration-actions">
+                <button onClick={saveYandexCredentials}>Сохранить зашифрованно</button>
+                <button onClick={connectYandexDisk} disabled={!yandexStatus?.credentials_configured}>Авторизовать диск</button>
+              </div>
+              <div className="watched-folder-form">
+                <label>Отслеживаемая папка<input value={watchedPath} onChange={(event) => setWatchedPath(event.target.value)} /></label>
+                <button onClick={connectWatchedFolder} disabled={!yandexStatus?.connected}>Подключить папку</button>
+              </div>
+              <div className="sync-meta">
+                <span>Последний статус: {yandexStatus?.last_sync_status ?? "ещё не запускалась"}</span>
+                <span>Последняя синхронизация: {yandexStatus?.last_sync_at ?? "—"}</span>
+              </div>
+              <div className="watched-list">
+                {(yandexStatus?.watched_sources ?? []).map((source) => <span key={source.id}>{source.root_path}</span>)}
+              </div>
+            </article>
+          </section>
+        ) : <>
         <header className="hero">
           <div><p>Умный архив</p><h1>Найдите документ по смыслу, а не по названию.</h1></div>
           <div className="hero-actions">
@@ -254,6 +326,7 @@ export default function Home() {
             ))}
           </section>
         )}
+        </>}
       </section>
 
       <aside className="inspector">
