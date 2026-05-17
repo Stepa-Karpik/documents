@@ -19,6 +19,12 @@ const FILES_API_BASE = process.env.NEXT_PUBLIC_FILES_API_BASE_URL || "http://loc
 const INTEGRATIONS_API_BASE = process.env.NEXT_PUBLIC_INTEGRATIONS_API_BASE_URL || "http://localhost:8310"
 const ONLYOFFICE_BASE = process.env.NEXT_PUBLIC_ONLYOFFICE_BASE_URL || "http://localhost:8088"
 
+function platformUrl(base: string, apiPath: string) {
+  const normalized = base.replace(/\/$/, "")
+  if (/\/(files-api|integrations-api)$/.test(normalized)) return `${normalized}${apiPath.replace(/^\/api/, "")}`
+  return `${normalized}${apiPath}`
+}
+
 const nav = [
   [Clock3, "Последние"],
   [FileText, "Все документы"],
@@ -125,7 +131,7 @@ export default function Home() {
   }, [subjectId])
 
   async function loadYandexStatus(activeSubjectId: string) {
-    const response = await fetch(`${INTEGRATIONS_API_BASE}/api/v1/providers/yandex-disk/status?owner_subject_id=${activeSubjectId}`, { credentials: "include" })
+    const response = await fetch(platformUrl(INTEGRATIONS_API_BASE, `/api/v1/providers/yandex-disk/status?owner_subject_id=${activeSubjectId}`), { credentials: "include" })
     if (response.ok) setYandexStatus(await response.json())
   }
 
@@ -160,11 +166,11 @@ export default function Home() {
   useEffect(() => {
     if (!previewId) return
     const heartbeat = window.setInterval(() => {
-      fetch(`${FILES_API_BASE}/api/v1/previews/${previewId}/heartbeat`, { method: "POST", credentials: "include" }).catch(() => undefined)
+      fetch(platformUrl(FILES_API_BASE, `/api/v1/previews/${previewId}/heartbeat`), { method: "POST", credentials: "include" }).catch(() => undefined)
     }, 30000)
     return () => {
       window.clearInterval(heartbeat)
-      fetch(`${FILES_API_BASE}/api/v1/previews/${previewId}/close`, { method: "POST", credentials: "include", keepalive: true }).catch(() => undefined)
+      fetch(platformUrl(FILES_API_BASE, `/api/v1/previews/${previewId}/close`), { method: "POST", credentials: "include", keepalive: true }).catch(() => undefined)
     }
   }, [previewId])
 
@@ -173,7 +179,7 @@ export default function Home() {
       setPreviewConfig(null)
       return
     }
-    fetch(`${FILES_API_BASE}/api/v1/previews/${previewId}/editor-config`, { credentials: "include" })
+    fetch(platformUrl(FILES_API_BASE, `/api/v1/previews/${previewId}/editor-config`), { credentials: "include" })
       .then((response) => response.ok ? response.json() : Promise.reject())
       .then((config: OnlyOfficeConfig) => setPreviewConfig(config))
       .catch(() => setPreviewConfig(null))
@@ -185,7 +191,7 @@ export default function Home() {
     const form = new FormData()
     form.append("owner_subject_id", subjectId)
     form.append("file", file)
-    const uploadResponse = await fetch(`${FILES_API_BASE}/api/v1/uploads/managed`, { method: "POST", body: form, credentials: "include" })
+    const uploadResponse = await fetch(platformUrl(FILES_API_BASE, "/api/v1/uploads/managed"), { method: "POST", body: form, credentials: "include" })
     const uploadedAsset: { asset_id: string } = await uploadResponse.json()
     await fetch(`${API_BASE}/api/v1/documents/managed`, {
       method: "POST",
@@ -199,11 +205,11 @@ export default function Home() {
 
   async function connectWatchedFolder() {
     if (!subjectId) return
-    const connectionsResponse = await fetch(`${INTEGRATIONS_API_BASE}/api/v1/connections?owner_subject_id=${subjectId}`, { credentials: "include" })
+    const connectionsResponse = await fetch(platformUrl(INTEGRATIONS_API_BASE, `/api/v1/connections?owner_subject_id=${subjectId}`), { credentials: "include" })
     const connections: { id: string; provider: string }[] = connectionsResponse.ok ? await connectionsResponse.json() : []
     const yandexConnection = connections.find((connection) => connection.provider === "yandex_disk")
     if (!yandexConnection) return
-    await fetch(`${INTEGRATIONS_API_BASE}/api/v1/watched-sources`, {
+    await fetch(platformUrl(INTEGRATIONS_API_BASE, "/api/v1/watched-sources"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ owner_subject_id: subjectId, provider: "yandex_disk", root_path: watchedPath, connection_id: yandexConnection.id }),
@@ -214,7 +220,7 @@ export default function Home() {
 
   async function connectYandexDisk() {
     if (!subjectId) return
-    const response = await fetch(`${INTEGRATIONS_API_BASE}/api/v1/oauth/yandex-disk/authorize?owner_subject_id=${subjectId}`, { credentials: "include" })
+    const response = await fetch(platformUrl(INTEGRATIONS_API_BASE, `/api/v1/oauth/yandex-disk/authorize?owner_subject_id=${subjectId}`), { credentials: "include" })
     if (!response.ok) return
     const payload: { authorization_url: string } = await response.json()
     window.location.href = payload.authorization_url
@@ -222,7 +228,7 @@ export default function Home() {
 
   async function saveYandexCredentials() {
     if (!subjectId) return
-    await fetch(`${INTEGRATIONS_API_BASE}/api/v1/providers/yandex-disk/credentials`, {
+    await fetch(platformUrl(INTEGRATIONS_API_BASE, "/api/v1/providers/yandex-disk/credentials"), {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ owner_subject_id: subjectId, client_id: yandexClientId, client_secret: yandexClientSecret }),
