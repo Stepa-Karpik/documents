@@ -5,6 +5,11 @@ services:
       POSTGRES_DB: documents
       POSTGRES_USER: documents
       POSTGRES_PASSWORD: documents
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U documents -d documents"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
     ports:
       - "127.0.0.1:5542:5432"
   redis:
@@ -19,7 +24,8 @@ services:
       - .env
     command: ["alembic", "upgrade", "head"]
     depends_on:
-      - postgres
+      postgres:
+        condition: service_healthy
 
   backend:
     build:
@@ -28,7 +34,8 @@ services:
     env_file:
       - .env
     depends_on:
-      - migrator
+      migrator:
+        condition: service_completed_successfully
     ports:
       - "127.0.0.1:8200:8200"
     networks:
