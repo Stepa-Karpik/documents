@@ -49,6 +49,10 @@ services:
       JWT_SECRET: ${ONLYOFFICE_JWT_SECRET:-change-me}
     ports:
       - "127.0.0.1:8088:80"
+    networks:
+      default:
+      ecosystem:
+        aliases: [onlyoffice-document-server]
 
   frontend:
     build:
@@ -56,6 +60,9 @@ services:
       dockerfile: Dockerfile
     environment:
       NEXT_PUBLIC_DOCUMENTS_API_BASE_URL: ${NEXT_PUBLIC_DOCUMENTS_API_BASE_URL:-http://localhost:8200}
+      NEXT_PUBLIC_FILES_API_BASE_URL: ${NEXT_PUBLIC_FILES_API_BASE_URL:-http://localhost:8320}
+      NEXT_PUBLIC_INTEGRATIONS_API_BASE_URL: ${NEXT_PUBLIC_INTEGRATIONS_API_BASE_URL:-http://localhost:8310}
+      NEXT_PUBLIC_ONLYOFFICE_BASE_URL: ${NEXT_PUBLIC_ONLYOFFICE_BASE_URL:-http://localhost:8088}
     ports:
       - "127.0.0.1:3200:3000"
 

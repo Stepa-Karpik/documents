@@ -70,6 +70,16 @@ nav a.active { background: var(--ink); color: #fff; }
 .mint { background: #d8eee5; }
 .inspector { padding: 20px; display: grid; align-content: start; gap: 18px; }
 .preview { min-height: 180px; border-radius: 22px; padding: 18px; background: #171717; color: #fff; display: flex; flex-direction: column; justify-content: end; }
+.preview.empty { gap: 6px; }
+.preview-frame, .preview-image, .onlyoffice-preview {
+  width: 100%;
+  height: min(52vh, 560px);
+  border: 0;
+  border-radius: 22px;
+  background: #fff;
+  object-fit: contain;
+}
+.preview-image { padding: 10px; }
 .preview span { opacity: .65; }
 .inspector h2 { font-size: 16px; margin: 0 0 8px; }
 .inspector p { margin: 0; color: var(--muted); line-height: 1.45; }

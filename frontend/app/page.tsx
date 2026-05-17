@@ -17,6 +17,7 @@ import {
 const API_BASE = process.env.NEXT_PUBLIC_DOCUMENTS_API_BASE_URL || "http://localhost:8200"
 const FILES_API_BASE = process.env.NEXT_PUBLIC_FILES_API_BASE_URL || "http://localhost:8320"
 const INTEGRATIONS_API_BASE = process.env.NEXT_PUBLIC_INTEGRATIONS_API_BASE_URL || "http://localhost:8310"
+const ONLYOFFICE_BASE = process.env.NEXT_PUBLIC_ONLYOFFICE_BASE_URL || "http://localhost:8088"
 
 const nav = [
   [Clock3, "Последние"],
@@ -52,6 +53,20 @@ type EventProposal = {
   description: string | null
   confirmed: boolean
 }
+type OnlyOfficeConfig = {
+  document: { fileType: string; key: string; title: string; url: string }
+  editorConfig: { mode: string }
+  width?: string
+  height?: string
+}
+
+declare global {
+  interface Window {
+    DocsAPI?: {
+      DocEditor: new (id: string, config: OnlyOfficeConfig) => { destroyEditor?: () => void }
+    }
+  }
+}
 
 export default function Home() {
   const [subjectId, setSubjectId] = useState<string | null>(null)
@@ -61,6 +76,7 @@ export default function Home() {
   const [groups, setGroups] = useState<Group[]>([])
   const [eventProposals, setEventProposals] = useState<EventProposal[]>([])
   const [previewId, setPreviewId] = useState<string | null>(null)
+  const [previewConfig, setPreviewConfig] = useState<OnlyOfficeConfig | null>(null)
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [uploading, setUploading] = useState(false)
   const [storageMode, setStorageMode] = useState<"managed" | "yandex_disk">("managed")
@@ -111,6 +127,7 @@ export default function Home() {
   useEffect(() => {
     if (!selected?.asset_id) {
       setPreviewId(null)
+      setPreviewConfig(null)
       return
     }
     fetch(`${API_BASE}/api/v1/documents/${selected.id}/preview`, { method: "POST", credentials: "include" })
@@ -118,6 +135,17 @@ export default function Home() {
       .then((preview: { preview_id: string }) => setPreviewId(preview.preview_id))
       .catch(() => setPreviewId(null))
   }, [selected?.id, selected?.asset_id])
+
+  useEffect(() => {
+    if (!previewId) {
+      setPreviewConfig(null)
+      return
+    }
+    fetch(`${FILES_API_BASE}/api/v1/previews/${previewId}/editor-config`, { credentials: "include" })
+      .then((response) => response.ok ? response.json() : Promise.reject())
+      .then((config: OnlyOfficeConfig) => setPreviewConfig(config))
+      .catch(() => setPreviewConfig(null))
+  }, [previewId])
 
   async function uploadManaged(file: File) {
     if (!subjectId) return
@@ -215,11 +243,7 @@ export default function Home() {
       </section>
 
       <aside className="inspector">
-        <div className="preview">
-          <span>Предпросмотр</span>
-          <strong>{selected?.filename ?? "Выберите документ"}</strong>
-          {previewId && <small>Сессия: {previewId}</small>}
-        </div>
+        <PreviewSurface document={selected} config={previewConfig} />
         <section><h2>Статус</h2><p>Preview: {selected?.preview_status ?? "—"}<br />Analysis: {selected?.analysis_status ?? "—"}</p></section>
         <section><h2>AI summary</h2><p>После обработки здесь появятся summary, сущности и найденные события.</p></section>
         <section>
@@ -237,4 +261,64 @@ export default function Home() {
       </aside>
     </main>
   )
+}
+
+function PreviewSurface({ document, config }: { document?: DocumentItem; config: OnlyOfficeConfig | null }) {
+  const extension = document?.filename.split(".").pop()?.toLowerCase()
+  const contentUrl = document?.asset_id ? `${FILES_API_BASE}/api/v1/assets/${document.asset_id}/content` : null
+
+  if (!document) {
+    return <div className="preview empty"><span>Предпросмотр</span><strong>Выберите документ</strong></div>
+  }
+
+  if (!contentUrl) {
+    return <div className="preview empty"><span>Предпросмотр</span><strong>{document.filename}</strong><small>Оригинал ещё не готов к просмотру</small></div>
+  }
+
+  if (extension === "pdf") {
+    return <iframe className="preview-frame" title={document.filename} src={contentUrl} />
+  }
+
+  if (["png", "jpg", "jpeg", "gif", "webp", "svg"].includes(extension ?? "")) {
+    return <img className="preview-image" alt={document.filename} src={contentUrl} />
+  }
+
+  if (["docx", "xlsx", "pptx", "doc", "xls", "ppt"].includes(extension ?? "") && config) {
+    return <OnlyOfficePreview config={config} />
+  }
+
+  return <div className="preview empty"><span>Предпросмотр</span><strong>{document.filename}</strong><small>Для этого формата готовится viewer</small></div>
+}
+
+function OnlyOfficePreview({ config }: { config: OnlyOfficeConfig }) {
+  useEffect(() => {
+    let editor: { destroyEditor?: () => void } | undefined
+    let cancelled = false
+    const scriptId = "onlyoffice-docs-api"
+    const mount = () => {
+      if (cancelled || !window.DocsAPI) return
+      editor = new window.DocsAPI.DocEditor("onlyoffice-preview", {
+        ...config,
+        width: "100%",
+        height: "100%",
+      })
+    }
+    const existing = document.getElementById(scriptId) as HTMLScriptElement | null
+    if (existing) {
+      if (window.DocsAPI) mount()
+      else existing.addEventListener("load", mount, { once: true })
+    } else {
+      const script = document.createElement("script")
+      script.id = scriptId
+      script.src = `${ONLYOFFICE_BASE}/web-apps/apps/api/documents/api.js`
+      script.onload = mount
+      document.body.appendChild(script)
+    }
+    return () => {
+      cancelled = true
+      editor?.destroyEditor?.()
+    }
+  }, [config])
+
+  return <div className="onlyoffice-preview" id="onlyoffice-preview" />
 }
