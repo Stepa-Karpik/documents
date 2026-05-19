@@ -122,7 +122,7 @@ def auth_session(ecosystem_session: str | None = Cookie(default=None)) -> dict:
     if not ecosystem_session:
         raise HTTPException(status_code=401, detail="missing session")
     result = _build_identity_client().exchange_browser_session(cookies={"ecosystem_session": ecosystem_session})
-    return {"subject_id": result.subject_id}
+    return {"subject_id": result.subject_id, "email": result.email, "username": result.username, "display_name": result.display_name}
 
 
 @app.post("/api/v1/documents/managed", status_code=status.HTTP_201_CREATED)

@@ -7,6 +7,9 @@ import httpx
 class SessionExchangeResult:
     subject_id: str
     access_token: str
+    email: str | None = None
+    username: str | None = None
+    display_name: str | None = None
 
 
 class HttpIdentityClient:

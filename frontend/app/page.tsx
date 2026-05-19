@@ -26,16 +26,18 @@ function platformUrl(base: string, apiPath: string) {
 }
 
 const nav = [
-  [Clock3, "Последние"],
-  [FileText, "Все документы"],
-  [Sparkles, "AI-группы"],
-  [Building2, "Компании"],
-  [Users, "Люди"],
-  [FolderKanban, "Проекты"],
-  [Landmark, "Финансы"],
-  [History, "История"],
-  [Link2, "Интеграции"],
+  ["recent", Clock3, "Последние"],
+  ["all", FileText, "Все документы"],
+  ["groups", Sparkles, "AI-группы"],
+  ["companies", Building2, "Компании"],
+  ["people", Users, "Люди"],
+  ["projects", FolderKanban, "Проекты"],
+  ["finance", Landmark, "Финансы"],
+  ["history", History, "История"],
+  ["integrations", Link2, "Интеграции"],
 ] as const
+
+type ActiveSection = typeof nav[number][0]
 
 type DocumentItem = {
   id: string
@@ -84,6 +86,7 @@ declare global {
 
 export default function Home() {
   const [subjectId, setSubjectId] = useState<string | null>(null)
+  const [accountLabel, setAccountLabel] = useState<string | null>(null)
   const [documents, setDocuments] = useState<DocumentItem[]>([])
   const [query, setQuery] = useState("")
   const [hits, setHits] = useState<SearchHit[]>([])
@@ -95,7 +98,7 @@ export default function Home() {
   const [uploading, setUploading] = useState(false)
   const [storageMode, setStorageMode] = useState<"managed" | "yandex_disk">("managed")
   const [watchedPath, setWatchedPath] = useState("/Docs")
-  const [activeView, setActiveView] = useState<"documents" | "integrations">("documents")
+  const [activeSection, setActiveSection] = useState<ActiveSection>("recent")
   const [yandexClientId, setYandexClientId] = useState("")
   const [yandexClientSecret, setYandexClientSecret] = useState("")
   const [yandexStatus, setYandexStatus] = useState<YandexStatus | null>(null)
@@ -103,7 +106,10 @@ export default function Home() {
   useEffect(() => {
     fetch(`${API_BASE}/api/v1/auth/session`, { credentials: "include" })
       .then((response) => response.ok ? response.json() : Promise.reject())
-      .then((session: { subject_id: string }) => setSubjectId(session.subject_id))
+      .then((session: { subject_id: string; username?: string | null; email?: string | null; display_name?: string | null }) => {
+        setSubjectId(session.subject_id)
+        setAccountLabel(session.display_name || session.username || session.email || session.subject_id)
+      })
       .catch(() => {
         const returnTo = encodeURIComponent(window.location.href)
         window.location.href = `https://auth.nerior.ru/login?return_to=${returnTo}`
@@ -136,10 +142,14 @@ export default function Home() {
   }
 
   const visibleDocuments = useMemo(() => {
-    if (!hits.length) return documents
-    const allowed = new Set(hits.map((hit) => hit.document_id))
-    return documents.filter((document) => allowed.has(document.id))
-  }, [documents, hits])
+    let items = documents
+    if (hits.length) {
+      const allowed = new Set(hits.map((hit) => hit.document_id))
+      items = items.filter((document) => allowed.has(document.id))
+    }
+    if (activeSection === "recent") return items.slice(0, 8)
+    return items
+  }, [documents, hits, activeSection])
 
   const selected = documents.find((document) => document.id === selectedId)
 
@@ -248,12 +258,14 @@ export default function Home() {
     setHits(await response.json())
   }
 
+  const sectionTitle = nav.find(([key]) => key === activeSection)?.[2] ?? "Документы"
+
   return (
     <main className="workspace-shell">
       <aside className="sidebar">
         <div className="brand"><div className="brand-mark">D</div><div><strong>Documents</strong><span>digital vault</span></div></div>
-        <nav>{nav.map(([Icon, label], index) => <button className={(index === 0 && activeView === "documents") || (label === "Интеграции" && activeView === "integrations") ? "active" : ""} key={label} onClick={() => setActiveView(label === "Интеграции" ? "integrations" : "documents")}><Icon size={17} />{label}</button>)}</nav>
-        <section className="storage-card"><span>Аккаунт</span><strong>{subjectId ?? "Нужен вход"}</strong><small>Managed + Яндекс Диск</small></section>
+        <nav>{nav.map(([key, Icon, label]) => <button className={activeSection === key ? "active" : ""} key={key} onClick={() => setActiveSection(key)}><Icon size={17} />{label}</button>)}</nav>
+        <section className="storage-card"><span>Аккаунт</span><strong>{accountLabel ?? "Нужен вход"}</strong><small>{subjectId ? "Nerior ID подключён" : "Требуется вход"}</small></section>
         <section className="integration-card">
           <span>Режим хранения</span>
           <select value={storageMode} onChange={(event) => setStorageMode(event.target.value as "managed" | "yandex_disk")}>
@@ -269,7 +281,7 @@ export default function Home() {
       </aside>
 
       <section className="content">
-        {activeView === "integrations" ? (
+        {activeSection === "integrations" ? (
           <section className="integrations-screen">
             <header><p>Интеграции</p><h1>Яндекс Диск</h1></header>
             <article className="integration-panel">
@@ -298,7 +310,7 @@ export default function Home() {
           </section>
         ) : <>
         <header className="hero">
-          <div><p>Умный архив</p><h1>Найдите документ по смыслу, а не по названию.</h1></div>
+          <div><p>Умный архив · {sectionTitle}</p><h1>Документы, сроки и контекст — в одном рабочем пространстве.</h1></div>
           <div className="hero-actions">
             <label className="upload-button">{uploading ? "Загрузка..." : "Загрузить файл"}<input type="file" onChange={(event) => event.target.files?.[0] && uploadManaged(event.target.files[0])} /></label>
             <label className="searchbox"><ScanSearch size={18} /><input value={query} onChange={(event) => setQuery(event.target.value)} onKeyDown={(event) => event.key === "Enter" && runSearch()} placeholder="найди договор, где был залог 2000 евро" /></label>
@@ -306,7 +318,7 @@ export default function Home() {
         </header>
         <section className="document-grid">
           {visibleDocuments.map((document) => (
-            <button className="doc-card" key={document.id} onClick={() => setSelectedId(document.id)}>
+            <button className={`doc-card ${selectedId === document.id ? "selected" : ""}`} key={document.id} onClick={() => setSelectedId(document.id)}>
               <div className="paper" />
               <h2>{document.filename}</h2>
               <p>{document.storage_mode === "external" ? "Яндекс Диск" : "Наше хранилище"}</p>
@@ -393,7 +405,7 @@ function EditableEventCard({ proposal, onConfirmed }: { proposal: EventProposal;
 
 function PreviewSurface({ document, config }: { document?: DocumentItem; config: OnlyOfficeConfig | null }) {
   const extension = document?.filename.split(".").pop()?.toLowerCase()
-  const contentUrl = document?.asset_id ? `${FILES_API_BASE}/api/v1/assets/${document.asset_id}/content` : null
+  const contentUrl = document?.asset_id ? platformUrl(FILES_API_BASE, `/api/v1/assets/${document.asset_id}/content`) : null
 
   if (!document) {
     return <div className="preview empty"><span>Предпросмотр</span><strong>Выберите документ</strong></div>
