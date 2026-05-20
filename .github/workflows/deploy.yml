@@ -64,6 +64,7 @@ jobs:
             git pull origin main
             docker network inspect ecosystem >/dev/null 2>&1 || docker network create ecosystem
             docker compose rm -fsv migrator || true
+            docker ps -aq --filter "name=_documents-" | xargs -r docker rm -f
             docker compose up -d --build --remove-orphans
             docker compose rm -fsv migrator || true
             docker image prune -f
