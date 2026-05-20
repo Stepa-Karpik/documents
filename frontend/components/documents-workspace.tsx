@@ -107,6 +107,7 @@ export default function DocumentsWorkspace({ initialSection = "recent" }: { init
   const [yandexStatus, setYandexStatus] = useState<YandexStatus | null>(null)
   const [previewOpen, setPreviewOpen] = useState(false)
   const [integrationNotice, setIntegrationNotice] = useState<string | null>(null)
+  const [yandexVerificationCode, setYandexVerificationCode] = useState("")
 
   useEffect(() => {
     const saved = localStorage.getItem("docs_storage_mode")
@@ -260,7 +261,25 @@ export default function DocumentsWorkspace({ initialSection = "recent" }: { init
       return
     }
     const payload: { authorization_url: string } = await response.json()
-    window.location.href = payload.authorization_url
+    window.open(payload.authorization_url, "_blank", "noopener,noreferrer")
+    setIntegrationNotice("После подтверждения в Яндексе вставьте код ниже и нажмите «Подключить».")
+  }
+
+  async function submitYandexVerificationCode() {
+    if (!subjectId || !yandexVerificationCode.trim()) return
+    const response = await fetch(platformUrl(INTEGRATIONS_API_BASE, "/api/v1/oauth/yandex-disk/verification-code"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ owner_subject_id: subjectId, code: yandexVerificationCode.trim() }),
+      credentials: "include",
+    })
+    if (!response.ok) {
+      setIntegrationNotice("Код не принят. Проверьте код подтверждения и попробуйте ещё раз.")
+      return
+    }
+    setYandexVerificationCode("")
+    setIntegrationNotice("Яндекс Диск подключён.")
+    await loadYandexStatus(subjectId)
   }
 
   async function saveYandexCredentials() {
@@ -346,6 +365,11 @@ export default function DocumentsWorkspace({ initialSection = "recent" }: { init
                 <div className="button-row">
                   <button onClick={saveYandexCredentials}>Сохранить</button>
                   <button onClick={connectYandexDisk} disabled={!yandexStatus?.credentials_configured}>Авторизовать диск</button>
+                </div>
+
+                <div className="code-row">
+                  <label>Код подтверждения<input value={yandexVerificationCode} onChange={(event) => setYandexVerificationCode(event.target.value)} placeholder="Код из Яндекса" /></label>
+                  <button onClick={submitYandexVerificationCode} disabled={!yandexVerificationCode.trim()}>Подключить</button>
                 </div>
 
                 <div className="folder-row">
