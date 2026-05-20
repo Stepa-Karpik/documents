@@ -43,6 +43,8 @@ class ExternalDocumentDiscover(BaseModel):
     external_path: str | None = None
     filename: str
     revision: str
+    content_type: str | None = None
+    asset_id: str | None = None
 
 
 class WatchedSourceCreate(BaseModel):
@@ -155,7 +157,11 @@ def request_document_preview(document_id: str, session: SessionDep) -> dict:
 
 @app.post("/api/v1/documents/external/discover", status_code=status.HTTP_201_CREATED)
 def discover_external_document(payload: ExternalDocumentDiscover, session: SessionDep) -> dict:
-    document = DocumentRepository(session).upsert_external_document(**payload.model_dump())
+    repo = DocumentRepository(session)
+    document = repo.upsert_external_document(**payload.model_dump(exclude={'asset_id'}))
+    if payload.asset_id is not None:
+        document = repo.assign_asset(document.id, asset_id=payload.asset_id)
+        _build_orchestrator(repo).process_document(document)
     return _document_to_dict(document)
 
 

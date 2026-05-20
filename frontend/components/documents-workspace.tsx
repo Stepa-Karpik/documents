@@ -72,6 +72,8 @@ type YandexStatus = {
   last_sync_status: string | null
   last_sync_at: string | null
 }
+type YandexUploadedFile = { provider: string; external_file_id: string; external_path: string; filename: string; revision: string; content_type: string }
+
 type OnlyOfficeConfig = {
   document: { fileType: string; key: string; title: string; url: string }
   editorConfig: { mode: string }
@@ -102,8 +104,6 @@ export default function DocumentsWorkspace({ initialSection = "recent" }: { init
   const [storageMode, setStorageMode] = useState<"managed" | "yandex_disk">("managed")
   const [watchedPath, setWatchedPath] = useState("/Docs")
   const [activeSection] = useState<ActiveSection>(initialSection)
-  const [yandexClientId, setYandexClientId] = useState("")
-  const [yandexClientSecret, setYandexClientSecret] = useState("")
   const [yandexStatus, setYandexStatus] = useState<YandexStatus | null>(null)
   const [previewOpen, setPreviewOpen] = useState(false)
   const [integrationNotice, setIntegrationNotice] = useState<string | null>(null)
@@ -152,9 +152,28 @@ export default function DocumentsWorkspace({ initialSection = "recent" }: { init
     if (firstSource) setWatchedPath(firstSource)
   }, [yandexStatus?.watched_sources])
 
+  useEffect(() => {
+    if (!subjectId || !yandexStatus?.connected || !(yandexStatus.watched_sources ?? []).length) return
+    syncYandexSources(yandexStatus).catch(() => undefined)
+    const timer = window.setInterval(() => {
+      syncYandexSources(yandexStatus).catch(() => undefined)
+    }, 30000)
+    return () => window.clearInterval(timer)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [subjectId, yandexStatus?.connected, yandexStatus?.watched_sources?.map((source) => source.id).join(",")])
+
   async function loadYandexStatus(activeSubjectId: string) {
     const response = await fetch(platformUrl(INTEGRATIONS_API_BASE, `/api/v1/providers/yandex-disk/status?owner_subject_id=${activeSubjectId}`), { credentials: "include" })
     if (response.ok) setYandexStatus(await response.json())
+  }
+
+  async function syncYandexSources(status: YandexStatus | null = yandexStatus) {
+    if (!subjectId || !status?.connected) return
+    const sources = status.watched_sources ?? []
+    if (!sources.length) return
+    await Promise.allSettled(sources.map((source) => fetch(platformUrl(INTEGRATIONS_API_BASE, `/api/v1/watched-sources/${source.id}/sync-now`), { method: "POST", credentials: "include" })))
+    await loadDocuments(subjectId)
+    await loadYandexStatus(subjectId)
   }
 
   const visibleDocuments = useMemo(() => {
@@ -212,22 +231,75 @@ export default function DocumentsWorkspace({ initialSection = "recent" }: { init
       .catch(() => setPreviewConfig(null))
   }, [previewId])
 
-  async function uploadManaged(file: File) {
-    if (!subjectId || storageMode === "yandex_disk") return
+  async function uploadFile(file: File) {
+    if (!subjectId) return
     setUploading(true)
-    const form = new FormData()
-    form.append("owner_subject_id", subjectId)
-    form.append("file", file)
-    const uploadResponse = await fetch(platformUrl(FILES_API_BASE, "/api/v1/uploads/managed"), { method: "POST", body: form, credentials: "include" })
-    const uploadedAsset: { asset_id: string } = await uploadResponse.json()
-    await fetch(`${API_BASE}/api/v1/documents/managed`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ owner_subject_id: subjectId, filename: file.name, content_type: file.type || "application/octet-stream", asset_id: uploadedAsset.asset_id }),
-      credentials: "include",
-    })
-    await loadDocuments(subjectId)
-    setUploading(false)
+    try {
+      if (storageMode === "yandex_disk") {
+        if (!yandexStatus?.connected) {
+          setIntegrationNotice("Сначала подключите Яндекс Диск в интеграциях.")
+          window.location.href = "/integrations"
+          return
+        }
+        const form = new FormData()
+        form.append("owner_subject_id", subjectId)
+        form.append("provider", "yandex_disk")
+        form.append("root_path", watchedPath || yandexStatus.watched_sources[0]?.root_path || "/Docs")
+        form.append("file", file)
+        const uploadResponse = await fetch(platformUrl(INTEGRATIONS_API_BASE, "/api/v1/external-files/upload"), { method: "POST", body: form, credentials: "include" })
+        if (!uploadResponse.ok) throw new Error("yandex upload failed")
+        const uploaded: YandexUploadedFile = await uploadResponse.json()
+        const assetResponse = await fetch(platformUrl(FILES_API_BASE, "/api/v1/assets/external"), {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            owner_subject_id: subjectId,
+            provider: uploaded.provider,
+            external_file_id: uploaded.external_file_id,
+            external_path: uploaded.external_path,
+            filename: uploaded.filename,
+            revision: uploaded.revision,
+            content_type: uploaded.content_type,
+          }),
+          credentials: "include",
+        })
+        if (!assetResponse.ok) throw new Error("external asset registration failed")
+        const asset: { asset_id: string } = await assetResponse.json()
+        await fetch(`${API_BASE}/api/v1/documents/external/discover`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            owner_subject_id: subjectId,
+            provider: uploaded.provider,
+            external_file_id: uploaded.external_file_id,
+            external_path: uploaded.external_path,
+            filename: uploaded.filename,
+            revision: uploaded.revision,
+            content_type: uploaded.content_type,
+            asset_id: asset.asset_id,
+          }),
+          credentials: "include",
+        })
+      } else {
+        const form = new FormData()
+        form.append("owner_subject_id", subjectId)
+        form.append("file", file)
+        const uploadResponse = await fetch(platformUrl(FILES_API_BASE, "/api/v1/uploads/managed"), { method: "POST", body: form, credentials: "include" })
+        if (!uploadResponse.ok) throw new Error("managed upload failed")
+        const uploadedAsset: { asset_id: string } = await uploadResponse.json()
+        await fetch(`${API_BASE}/api/v1/documents/managed`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ owner_subject_id: subjectId, filename: file.name, content_type: file.type || "application/octet-stream", asset_id: uploadedAsset.asset_id }),
+          credentials: "include",
+        })
+      }
+      await loadDocuments(subjectId)
+    } catch {
+      setIntegrationNotice("Не удалось загрузить файл. Проверьте подключение и попробуйте ещё раз.")
+    } finally {
+      setUploading(false)
+    }
   }
 
   async function connectWatchedFolder() {
@@ -257,7 +329,7 @@ export default function DocumentsWorkspace({ initialSection = "recent" }: { init
     if (!subjectId) return
     const response = await fetch(platformUrl(INTEGRATIONS_API_BASE, `/api/v1/oauth/yandex-disk/authorize?owner_subject_id=${subjectId}`), { credentials: "include" })
     if (!response.ok) {
-      setIntegrationNotice("OAuth пока недоступен: проверьте Client ID и Client Secret.")
+      setIntegrationNotice("Авторизация Яндекс Диска пока недоступна.")
       return
     }
     const payload: { authorization_url: string } = await response.json()
@@ -279,23 +351,6 @@ export default function DocumentsWorkspace({ initialSection = "recent" }: { init
     }
     setYandexVerificationCode("")
     setIntegrationNotice("Яндекс Диск подключён.")
-    await loadYandexStatus(subjectId)
-  }
-
-  async function saveYandexCredentials() {
-    if (!subjectId) return
-    const response = await fetch(platformUrl(INTEGRATIONS_API_BASE, "/api/v1/providers/yandex-disk/credentials"), {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ owner_subject_id: subjectId, client_id: yandexClientId, client_secret: yandexClientSecret }),
-      credentials: "include",
-    })
-    if (!response.ok) {
-      setIntegrationNotice("Не удалось сохранить OAuth credentials.")
-      return
-    }
-    setIntegrationNotice("Настройки сохранены.")
-    setYandexClientSecret("")
     await loadYandexStatus(subjectId)
   }
 
@@ -345,11 +400,11 @@ export default function DocumentsWorkspace({ initialSection = "recent" }: { init
 
         {activeSection === "integrations" ? (
           <section className="screen narrow-screen">
-            <div className="page-head"><h1>Интеграции</h1><p>Хранение, Яндекс Диск и автосинхронизация документов.</p></div>
+            <div className="page-head"><h1>Интеграции</h1><p>Выберите, где будут лежать оригиналы документов.</p></div>
             <article className="panel integration-panel">
               <div className="panel-head">
-                <div><h2>Яндекс Диск</h2><p>Файлы могут лежать на диске пользователя, а сервис будет хранить индексы, summary и кеш предпросмотра.</p></div>
-                <span className={`status-badge ${yandexStatus?.connected ? "ok" : "warn"}`}>{yandexStatus?.connected ? "Подключён" : "Не подключён"}</span>
+                <div><h2>Хранение файлов</h2></div>
+                <span className={`status-badge ${storageMode === "managed" || yandexStatus?.connected ? "ok" : "warn"}`}>{storageMode === "managed" ? "Наше хранилище" : yandexStatus?.connected ? "Подключён" : "Не подключён"}</span>
               </div>
 
               <div className="storage-switch" role="group" aria-label="Режим хранения">
@@ -358,24 +413,26 @@ export default function DocumentsWorkspace({ initialSection = "recent" }: { init
               </div>
 
               <div className={`yandex-settings ${storageMode === "yandex_disk" ? "open" : "closed"}`} aria-hidden={storageMode !== "yandex_disk"}>
-                <div className="form-grid">
-                  <label>Client ID<input value={yandexClientId} onChange={(event) => setYandexClientId(event.target.value)} placeholder="Client ID" /></label>
-                  <label>Client Secret<input type="password" value={yandexClientSecret} onChange={(event) => setYandexClientSecret(event.target.value)} placeholder="Client Secret" /></label>
-                </div>
-                <div className="button-row">
-                  <button onClick={saveYandexCredentials}>Сохранить</button>
-                  <button onClick={connectYandexDisk} disabled={!yandexStatus?.credentials_configured}>Авторизовать диск</button>
-                </div>
+                {!yandexStatus?.connected && (
+                  <div className="button-row">
+                    <button onClick={connectYandexDisk} disabled={!yandexStatus?.credentials_configured}>Авторизовать диск</button>
+                  </div>
+                )}
 
-                <div className="code-row">
-                  <label>Код подтверждения<input value={yandexVerificationCode} onChange={(event) => setYandexVerificationCode(event.target.value)} placeholder="Код из Яндекса" /></label>
-                  <button onClick={submitYandexVerificationCode} disabled={!yandexVerificationCode.trim()}>Подключить</button>
-                </div>
+                {!yandexStatus?.connected && (
+                  <div className="code-row">
+                    <label>Код подтверждения<input value={yandexVerificationCode} onChange={(event) => setYandexVerificationCode(event.target.value)} placeholder="Код из Яндекса" /></label>
+                    <button onClick={submitYandexVerificationCode} disabled={!yandexVerificationCode.trim()}>Подключить</button>
+                  </div>
+                )}
 
-                <div className="folder-row">
-                  <label>Отслеживаемая папка<input value={watchedPath} onChange={(event) => setWatchedPath(event.target.value)} placeholder="/Docs" /></label>
-                  <button onClick={connectWatchedFolder} disabled={!yandexStatus?.connected}>Сохранить</button>
-                </div>
+                {yandexStatus?.connected && (
+                  <div className="folder-row">
+                    <label>Папка на диске<input value={watchedPath} onChange={(event) => setWatchedPath(event.target.value)} placeholder="/Docs" /></label>
+                    <button onClick={connectWatchedFolder}>Сохранить</button>
+                    <button onClick={() => syncYandexSources()}>Обновить</button>
+                  </div>
+                )}
                 {integrationNotice && <p className="notice">{integrationNotice}</p>}
                 {!!(yandexStatus?.watched_sources ?? []).length && <div className="watched-list">{yandexStatus?.watched_sources.map((source) => <span key={source.id}>{source.root_path}</span>)}</div>}
               </div>
@@ -386,9 +443,7 @@ export default function DocumentsWorkspace({ initialSection = "recent" }: { init
             <div className="hero-card">
               <div><p>Умный архив · {sectionTitle}</p><h1>Найдите документ по смыслу, срокам и контексту.</h1></div>
               <div className="hero-actions">
-                {storageMode === "managed" ? (
-                  <label className="upload-button">{uploading ? "Загрузка..." : "Загрузить файл"}<input type="file" onChange={(event) => event.target.files?.[0] && uploadManaged(event.target.files[0])} /></label>
-                ) : <Link className="upload-button muted-button" href="/integrations">Загрузка через Яндекс Диск</Link>}
+                <label className="upload-button">{uploading ? "Загрузка..." : "Загрузить файл"}<input type="file" onChange={(event) => event.target.files?.[0] && uploadFile(event.target.files[0])} /></label>
                 <label className="searchbox"><ScanSearch size={18} /><input value={query} onChange={(event) => setQuery(event.target.value)} onKeyDown={(event) => event.key === "Enter" && runSearch()} placeholder="найди договор, где был залог 2000 евро" /></label>
               </div>
             </div>
