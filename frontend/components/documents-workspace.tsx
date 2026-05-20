@@ -248,7 +248,7 @@ export default function DocumentsWorkspace({ initialSection = "recent" }: { init
       setIntegrationNotice("Не удалось сохранить отслеживаемую папку.")
       return
     }
-    setIntegrationNotice(`Папка ${watchedPath} сохранена для автосинхронизации.`)
+    setIntegrationNotice(`Папка ${watchedPath} выбрана. Если её нет на диске, мы создадим её автоматически.`)
     await loadYandexStatus(subjectId)
   }
 
@@ -275,7 +275,7 @@ export default function DocumentsWorkspace({ initialSection = "recent" }: { init
       setIntegrationNotice("Не удалось сохранить OAuth credentials.")
       return
     }
-    setIntegrationNotice("OAuth credentials сохранены зашифрованно.")
+    setIntegrationNotice("Настройки сохранены.")
     setYandexClientSecret("")
     await loadYandexStatus(subjectId)
   }
@@ -338,27 +338,22 @@ export default function DocumentsWorkspace({ initialSection = "recent" }: { init
                 <button className={storageMode === "yandex_disk" ? "selected" : ""} onClick={() => { setStorageMode("yandex_disk"); localStorage.setItem("docs_storage_mode", "yandex_disk") }}>Мой Яндекс Диск</button>
               </div>
 
-              <div className="form-grid">
-                <label>Client ID<input value={yandexClientId} onChange={(event) => setYandexClientId(event.target.value)} placeholder="YANDEX_DISK_CLIENT_ID" /></label>
-                <label>Client Secret<input type="password" value={yandexClientSecret} onChange={(event) => setYandexClientSecret(event.target.value)} placeholder="YANDEX_DISK_CLIENT_SECRET" /></label>
-              </div>
-              <div className="button-row">
-                <button onClick={saveYandexCredentials}>Сохранить зашифрованно</button>
-                <button onClick={connectYandexDisk} disabled={!yandexStatus?.credentials_configured}>Авторизовать диск</button>
-              </div>
+              <div className={`yandex-settings ${storageMode === "yandex_disk" ? "open" : "closed"}`} aria-hidden={storageMode !== "yandex_disk"}>
+                <div className="form-grid">
+                  <label>Client ID<input value={yandexClientId} onChange={(event) => setYandexClientId(event.target.value)} placeholder="Client ID" /></label>
+                  <label>Client Secret<input type="password" value={yandexClientSecret} onChange={(event) => setYandexClientSecret(event.target.value)} placeholder="Client Secret" /></label>
+                </div>
+                <div className="button-row">
+                  <button onClick={saveYandexCredentials}>Сохранить</button>
+                  <button onClick={connectYandexDisk} disabled={!yandexStatus?.credentials_configured}>Авторизовать диск</button>
+                </div>
 
-              <div className="folder-row">
-                <label>Отслеживаемая папка<input value={watchedPath} onChange={(event) => setWatchedPath(event.target.value)} placeholder="/Docs" /></label>
-                <button onClick={connectWatchedFolder} disabled={!yandexStatus?.connected}>Сохранить папку</button>
-              </div>
-              {integrationNotice && <p className="notice">{integrationNotice}</p>}
-              <div className="sync-grid">
-                <span>Credentials: {yandexStatus?.credentials_configured ? "настроены" : "не настроены"}</span>
-                <span>Последний статус: {yandexStatus?.last_sync_status ?? "ещё не запускалась"}</span>
-                <span>Последняя синхронизация: {yandexStatus?.last_sync_at ?? "—"}</span>
-              </div>
-              <div className="watched-list">
-                {(yandexStatus?.watched_sources ?? []).length ? yandexStatus?.watched_sources.map((source) => <span key={source.id}>{source.root_path}</span>) : <span>Папка ещё не выбрана</span>}
+                <div className="folder-row">
+                  <label>Отслеживаемая папка<input value={watchedPath} onChange={(event) => setWatchedPath(event.target.value)} placeholder="/Docs" /></label>
+                  <button onClick={connectWatchedFolder} disabled={!yandexStatus?.connected}>Сохранить</button>
+                </div>
+                {integrationNotice && <p className="notice">{integrationNotice}</p>}
+                {!!(yandexStatus?.watched_sources ?? []).length && <div className="watched-list">{yandexStatus?.watched_sources.map((source) => <span key={source.id}>{source.root_path}</span>)}</div>}
               </div>
             </article>
           </section>
