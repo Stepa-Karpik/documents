@@ -4,16 +4,29 @@ import Link from "next/link"
 import { useEffect, useMemo, useState } from "react"
 import {
   Bell,
+  Box,
+  BriefcaseBusiness,
   Building2,
+  ChevronRight,
   Clock3,
+  Download,
+  FileSpreadsheet,
   FileText,
   FolderKanban,
+  Globe2,
   History,
-  Landmark,
+  Languages,
   Link2,
-  ScanSearch,
+  Moon,
+  Plus,
+  Search,
+  Send,
   Sparkles,
+  Sun,
+  Trash2,
+  UserRound,
   Users,
+  X,
 } from "lucide-react"
 
 const API_BASE = process.env.NEXT_PUBLIC_DOCUMENTS_API_BASE_URL || "http://localhost:8200"
@@ -31,24 +44,27 @@ const nav = [
   ["recent", Clock3, "Последние"],
   ["documents", FileText, "Все документы"],
   ["groups", Sparkles, "AI-группы"],
+  ["projects", FolderKanban, "Проекты"],
   ["companies", Building2, "Компании"],
   ["people", Users, "Люди"],
-  ["projects", FolderKanban, "Проекты"],
-  ["finance", Landmark, "Финансы"],
+  ["trash", Trash2, "Корзина"],
   ["history", History, "История"],
-  ["feed", Bell, "Лента"],
   ["integrations", Link2, "Интеграции"],
 ] as const
 
-type ActiveSection = typeof nav[number][0]
+type ActiveSection = typeof nav[number][0] | "finance" | "feed" | "support"
+type EntityKind = "person" | "company" | "project" | "finance" | "topic"
 
 type DocumentItem = {
   id: string
   filename: string
   storage_mode: "managed" | "external"
   asset_id: string | null
+  content_type?: string | null
   analysis_status: string
   preview_status: string
+  analysis_summary?: string | null
+  analysis_entities?: string[]
 }
 
 type SearchHit = { document_id: string; score: number }
@@ -76,7 +92,9 @@ type YandexUploadedFile = { provider: string; external_file_id: string; external
 
 type OnlyOfficeConfig = {
   document: { fileType: string; key: string; title: string; url: string }
+  documentType?: string
   editorConfig: { mode: string }
+  token?: string
   width?: string
   height?: string
 }
@@ -108,6 +126,7 @@ export default function DocumentsWorkspace({ initialSection = "recent" }: { init
   const [previewOpen, setPreviewOpen] = useState(false)
   const [integrationNotice, setIntegrationNotice] = useState<string | null>(null)
   const [yandexVerificationCode, setYandexVerificationCode] = useState("")
+  const [selectedEntityName, setSelectedEntityName] = useState<string | null>(null)
 
   useEffect(() => {
     const saved = localStorage.getItem("docs_storage_mode")
@@ -155,9 +174,7 @@ export default function DocumentsWorkspace({ initialSection = "recent" }: { init
   useEffect(() => {
     if (!subjectId || !yandexStatus?.connected || !(yandexStatus.watched_sources ?? []).length) return
     syncYandexSources(yandexStatus).catch(() => undefined)
-    const timer = window.setInterval(() => {
-      syncYandexSources(yandexStatus).catch(() => undefined)
-    }, 30000)
+    const timer = window.setInterval(() => syncYandexSources(yandexStatus).catch(() => undefined), 30000)
     return () => window.clearInterval(timer)
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [subjectId, yandexStatus?.connected, yandexStatus?.watched_sources?.map((source) => source.id).join(",")])
@@ -173,24 +190,46 @@ export default function DocumentsWorkspace({ initialSection = "recent" }: { init
     if (!sources.length) return
     await Promise.allSettled(sources.map((source) => fetch(platformUrl(INTEGRATIONS_API_BASE, `/api/v1/watched-sources/${source.id}/sync-now`), { method: "POST", credentials: "include" })))
     await loadDocuments(subjectId)
+    await loadGroups(subjectId)
     await loadYandexStatus(subjectId)
   }
 
-  const visibleDocuments = useMemo(() => {
+  const selected = documents.find((document) => document.id === selectedId)
+  const filteredDocuments = useMemo(() => {
     let items = documents
     if (hits.length) {
       const allowed = new Set(hits.map((hit) => hit.document_id))
       items = items.filter((document) => allowed.has(document.id))
     }
-    if (activeSection === "recent") return items.slice(0, 8)
+    if (activeSection === "recent") return items.slice(0, 10)
     return items
   }, [documents, hits, activeSection])
 
-  const selected = documents.find((document) => document.id === selectedId)
+  const meaningfulGroups = useMemo(() => groups.map((group) => ({
+    ...group,
+    items: group.items.filter((item) => isUsefulGroupName(item.name)),
+  })).filter((group) => group.items.length > 0), [groups])
+
+  const entityKind = sectionToEntityKind(activeSection)
+  const entityGroup = entityKind ? meaningfulGroups.find((group) => group.kind === entityKind) : null
+  const selectedEntity = selectedEntityName ? entityGroup?.items.find((item) => item.name === selectedEntityName) : entityGroup?.items[0]
+  const entityDocuments = useMemo(() => {
+    if (!selectedEntity) return []
+    const tokens = entityTokens(selectedEntity.name)
+    return documents.filter((document) => {
+      const corpus = [document.filename, document.analysis_summary ?? '', ...(document.analysis_entities ?? [])].join(' ').toLowerCase()
+      return tokens.some((token) => corpus.includes(token))
+    })
+  }, [documents, selectedEntity])
 
   useEffect(() => {
-    if (!selectedId) return
-    if (!previewOpen) return
+    if (entityGroup?.items.length && !entityGroup.items.some((item) => item.name === selectedEntityName)) {
+      setSelectedEntityName(entityGroup.items[0].name)
+    }
+  }, [entityGroup, selectedEntityName])
+
+  useEffect(() => {
+    if (!selectedId || !previewOpen) return
     fetch(`${API_BASE}/api/v1/documents/${selectedId}/event-proposals`, { credentials: "include" })
       .then((response) => response.ok ? response.json() : [])
       .then((items: EventProposal[]) => setEventProposals(items))
@@ -252,15 +291,7 @@ export default function DocumentsWorkspace({ initialSection = "recent" }: { init
         const assetResponse = await fetch(platformUrl(FILES_API_BASE, "/api/v1/assets/external"), {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            owner_subject_id: subjectId,
-            provider: uploaded.provider,
-            external_file_id: uploaded.external_file_id,
-            external_path: uploaded.external_path,
-            filename: uploaded.filename,
-            revision: uploaded.revision,
-            content_type: uploaded.content_type,
-          }),
+          body: JSON.stringify({ owner_subject_id: subjectId, provider: uploaded.provider, external_file_id: uploaded.external_file_id, external_path: uploaded.external_path, filename: uploaded.filename, revision: uploaded.revision, content_type: uploaded.content_type }),
           credentials: "include",
         })
         if (!assetResponse.ok) throw new Error("external asset registration failed")
@@ -268,16 +299,7 @@ export default function DocumentsWorkspace({ initialSection = "recent" }: { init
         await fetch(`${API_BASE}/api/v1/documents/external/discover`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            owner_subject_id: subjectId,
-            provider: uploaded.provider,
-            external_file_id: uploaded.external_file_id,
-            external_path: uploaded.external_path,
-            filename: uploaded.filename,
-            revision: uploaded.revision,
-            content_type: uploaded.content_type,
-            asset_id: asset.asset_id,
-          }),
+          body: JSON.stringify({ owner_subject_id: subjectId, provider: uploaded.provider, external_file_id: uploaded.external_file_id, external_path: uploaded.external_path, filename: uploaded.filename, revision: uploaded.revision, content_type: uploaded.content_type, asset_id: asset.asset_id }),
           credentials: "include",
         })
       } else {
@@ -295,6 +317,7 @@ export default function DocumentsWorkspace({ initialSection = "recent" }: { init
         })
       }
       await loadDocuments(subjectId)
+      await loadGroups(subjectId)
     } catch {
       setIntegrationNotice("Не удалось загрузить файл. Проверьте подключение и попробуйте ещё раз.")
     } finally {
@@ -321,8 +344,9 @@ export default function DocumentsWorkspace({ initialSection = "recent" }: { init
       setIntegrationNotice("Не удалось сохранить отслеживаемую папку.")
       return
     }
-    setIntegrationNotice(`Папка ${watchedPath} выбрана. Если её нет на диске, мы создадим её автоматически.`)
+    setIntegrationNotice(`Папка ${watchedPath} выбрана.`)
     await loadYandexStatus(subjectId)
+    await syncYandexSources()
   }
 
   async function connectYandexDisk() {
@@ -361,13 +385,8 @@ export default function DocumentsWorkspace({ initialSection = "recent" }: { init
     }
     if (!subjectId) return
     const response = await fetch(`${API_BASE}/api/v1/search?owner_subject_id=${subjectId}&q=${encodeURIComponent(query)}`, { credentials: "include" })
-    setHits(await response.json())
+    if (response.ok) setHits(await response.json())
   }
-
-  const meaningfulGroups = useMemo(() => groups.map((group) => ({
-    ...group,
-    items: group.items.filter((item) => isUsefulGroupName(item.name)),
-  })).filter((group) => group.items.length > 0), [groups])
 
   const sectionTitle = nav.find(([key]) => key === activeSection)?.[2] ?? "Документы"
 
@@ -382,104 +401,56 @@ export default function DocumentsWorkspace({ initialSection = "recent" }: { init
           <span className="nav-caption">Навигация</span>
           <nav>{nav.map(([key, Icon, label]) => (
             <Link className={activeSection === key ? "active" : ""} key={key} href={`/${key}`}>
-              <Icon size={17} />{label}
+              <Icon size={16} />{label}
             </Link>
           ))}</nav>
         </div>
         <div className="sidebar-spacer" />
-        <Link className="side-link" href="/integrations"><Link2 size={16} />Интеграции</Link>
-        <div className="account-pill"><Users size={15} /><span>{accountLabel ?? "Нужен вход"}</span></div>
-        <button className="side-link danger" type="button" onClick={() => { window.location.href = "https://auth.nerior.ru/logout" }}>Выйти</button>
+        <Link className="side-link" href="/support"><Globe2 size={15} />Поддержка</Link>
+        <button className="side-link" type="button"><Languages size={15} />RU</button>
+        <button className="side-link" type="button"><Sun size={15} />Светлая тема</button>
+        <div className="account-pill"><UserRound size={15} /><span>{accountLabel ?? "Нужен вход"}</span></div>
+        <button className="side-link danger" type="button" onClick={() => { window.location.href = "https://auth.nerior.ru/logout" }}><Send size={15} />Выйти</button>
       </aside>
 
       <section className="content">
         <header className="topbar">
-          <div className="topbar-icon"><FileText size={16} /></div>
-          <div><strong>{sectionTitle}</strong><span>Интеллектуальный архив Nerior</span></div>
+          <div className="topbar-left"><div className="topbar-icon"><FileText size={16} /></div><div><strong>{sectionTitle}</strong><span>Интеллектуальный архив Nerior</span></div></div>
+          <div className="topbar-actions">
+            {activeSection !== "integrations" && <label className="upload-button top-upload"><Plus size={16} />{uploading ? "Загрузка..." : "Загрузить файл"}<input type="file" onChange={(event) => event.target.files?.[0] && uploadFile(event.target.files[0])} /></label>}
+          </div>
         </header>
 
         {activeSection === "integrations" ? (
-          <section className="screen narrow-screen">
-            <div className="page-head"><h1>Интеграции</h1><p>Выберите, где будут лежать оригиналы документов.</p></div>
-            <article className="panel integration-panel">
-              <div className="panel-head">
-                <div><h2>Хранение файлов</h2></div>
-                <span className={`status-badge ${storageMode === "managed" || yandexStatus?.connected ? "ok" : "warn"}`}>{storageMode === "managed" ? "Наше хранилище" : yandexStatus?.connected ? "Подключён" : "Не подключён"}</span>
-              </div>
-
-              <div className="storage-switch" role="group" aria-label="Режим хранения">
-                <button className={storageMode === "managed" ? "selected" : ""} onClick={() => { setStorageMode("managed"); localStorage.setItem("docs_storage_mode", "managed") }}>Хранить у нас</button>
-                <button className={storageMode === "yandex_disk" ? "selected" : ""} onClick={() => { setStorageMode("yandex_disk"); localStorage.setItem("docs_storage_mode", "yandex_disk") }}>Мой Яндекс Диск</button>
-              </div>
-
-              <div className={`yandex-settings ${storageMode === "yandex_disk" ? "open" : "closed"}`} aria-hidden={storageMode !== "yandex_disk"}>
-                {!yandexStatus?.connected && (
-                  <div className="button-row">
-                    <button onClick={connectYandexDisk} disabled={!yandexStatus?.credentials_configured}>Авторизовать диск</button>
-                  </div>
-                )}
-
-                {!yandexStatus?.connected && (
-                  <div className="code-row">
-                    <label>Код подтверждения<input value={yandexVerificationCode} onChange={(event) => setYandexVerificationCode(event.target.value)} placeholder="Код из Яндекса" /></label>
-                    <button onClick={submitYandexVerificationCode} disabled={!yandexVerificationCode.trim()}>Подключить</button>
-                  </div>
-                )}
-
-                {yandexStatus?.connected && (
-                  <div className="folder-row">
-                    <label>Папка на диске<input value={watchedPath} onChange={(event) => setWatchedPath(event.target.value)} placeholder="/Docs" /></label>
-                    <button onClick={connectWatchedFolder}>Сохранить</button>
-                    <button onClick={() => syncYandexSources()}>Обновить</button>
-                  </div>
-                )}
-                {integrationNotice && <p className="notice">{integrationNotice}</p>}
-                {!!(yandexStatus?.watched_sources ?? []).length && <div className="watched-list">{yandexStatus?.watched_sources.map((source) => <span key={source.id}>{source.root_path}</span>)}</div>}
-              </div>
-            </article>
-          </section>
+          <IntegrationsScreen storageMode={storageMode} setStorageMode={setStorageMode} yandexStatus={yandexStatus} watchedPath={watchedPath} setWatchedPath={setWatchedPath} yandexVerificationCode={yandexVerificationCode} setYandexVerificationCode={setYandexVerificationCode} connectYandexDisk={connectYandexDisk} submitYandexVerificationCode={submitYandexVerificationCode} connectWatchedFolder={connectWatchedFolder} syncYandexSources={syncYandexSources} integrationNotice={integrationNotice} />
+        ) : activeSection === "groups" ? (
+          <GroupsScreen groups={meaningfulGroups} />
+        ) : entityKind ? (
+          <EntityScreen kind={entityKind} title={sectionTitle} group={entityGroup} selected={selectedEntity ?? null} onSelect={setSelectedEntityName} documents={entityDocuments} onOpenDocument={(id) => { setSelectedId(id); setPreviewOpen(true) }} />
+        ) : activeSection === "trash" ? (
+          <EmptyPanel title="Корзина" text="Удалённые документы появятся здесь после включения мягкого удаления." />
+        ) : activeSection === "history" ? (
+          <EmptyPanel title="История" text="Здесь будет лента загрузок, просмотров, синхронизаций и AI-обработки." />
         ) : (
-          <section className="screen">
-            <div className="hero-card">
-              <div><p>Умный архив · {sectionTitle}</p><h1>Найдите документ по смыслу, срокам и контексту.</h1></div>
-              <div className="hero-actions">
-                <label className="upload-button">{uploading ? "Загрузка..." : "Загрузить файл"}<input type="file" onChange={(event) => event.target.files?.[0] && uploadFile(event.target.files[0])} /></label>
-                <label className="searchbox"><ScanSearch size={18} /><input value={query} onChange={(event) => setQuery(event.target.value)} onKeyDown={(event) => event.key === "Enter" && runSearch()} placeholder="найди договор, где был залог 2000 евро" /></label>
-              </div>
-            </div>
-
-            {activeSection === "groups" ? (
-              <section className="panel group-section">
-                <h2>AI-группы</h2>
-                {!meaningfulGroups.length && <div className="empty-state">AI-группы появятся после извлечения осмысленных сущностей: компаний, людей, проектов, недвижимости, финансов и документов. Числовой шум скрыт.</div>}
-                {!!meaningfulGroups.length && <div className="group-board">{meaningfulGroups.map((group) => <article key={group.kind}><span>{group.title}</span><div>{group.items.map((item) => <button key={item.name} type="button" onClick={() => setQuery(item.name)}>{item.name}<em>{item.document_count}</em></button>)}</div></article>)}</div>}
-              </section>
-            ) : (
-              <section className="document-grid">
-                {visibleDocuments.map((document) => (
-                  <button className={`doc-card ${selectedId === document.id ? "selected" : ""}`} key={document.id} onClick={() => { setSelectedId(document.id); setPreviewOpen(true) }}>
-                    <div className="paper"><FileText size={26} /></div>
-                    <h2>{document.filename}</h2>
-                    <p>{document.storage_mode === "external" ? "Яндекс Диск" : "Наше хранилище"}</p>
-                    <span className="pill mint">AI: {document.analysis_status}</span>
-                  </button>
-                ))}
-                {!visibleDocuments.length && <div className="empty-state">Документы пока не найдены.</div>}
-              </section>
-            )}
-          </section>
+          <DocumentsTable title={activeSection === "recent" ? "Последние" : "Все документы"} documents={filteredDocuments} query={query} setQuery={setQuery} runSearch={runSearch} onOpenDocument={(id) => { setSelectedId(id); setPreviewOpen(true) }} uploading={uploading} uploadFile={uploadFile} />
         )}
       </section>
 
       {previewOpen && selected && (
         <div className="modal-backdrop" role="dialog" aria-modal="true" onMouseDown={(event) => { if (event.target === event.currentTarget) setPreviewOpen(false) }}>
           <section className="preview-modal">
-            <header className="modal-head"><div><span>Предпросмотр</span><h2>{selected.filename}</h2></div><button onClick={() => setPreviewOpen(false)}>Закрыть</button></header>
+            <header className="modal-head">
+              <div><span>Предпросмотр</span><h2>{selected.filename}</h2></div>
+              <div className="modal-actions">
+                {selected.asset_id && <a className="download-button" href={platformUrl(FILES_API_BASE, `/api/v1/assets/${selected.asset_id}/download`)}><Download size={17} />Скачать</a>}
+                <button onClick={() => setPreviewOpen(false)}><X size={17} />Закрыть</button>
+              </div>
+            </header>
             <div className="modal-body">
               <PreviewSurface document={selected} config={previewConfig} />
               <aside className="modal-insights">
                 <section><h3>Статус</h3><p>Preview: {selected.preview_status}<br />Analysis: {selected.analysis_status}</p></section>
-                <section><h3>AI summary</h3><p>После обработки здесь появятся summary, сущности и найденные события.</p></section>
+                <section><h3>AI summary</h3><p>{selected.analysis_summary || "После обработки здесь появятся summary, сущности и найденные события."}</p></section>
                 <section><h3>Найденные события</h3>{!eventProposals.length && <p>Пока нет предложений из документа.</p>}{eventProposals.map((proposal) => <EditableEventCard key={proposal.id} proposal={proposal} onConfirmed={(updated) => setEventProposals((items) => items.map((item) => item.id === updated.id ? updated : item))} />)}</section>
               </aside>
             </div>
@@ -490,75 +461,35 @@ export default function DocumentsWorkspace({ initialSection = "recent" }: { init
   )
 }
 
-
-function isUsefulGroupName(name: string) {
-  const normalized = name.trim()
-  if (normalized.length < 3) return false
-  if (/^\d+([.,]\d+)?$/.test(normalized)) return false
-  if (/^[\d\s.,:;№#/-]+$/.test(normalized)) return false
-  return /[a-zа-яё]/i.test(normalized)
+function DocumentsTable({ title, documents, query, setQuery, runSearch, onOpenDocument, uploading, uploadFile }: { title: string; documents: DocumentItem[]; query: string; setQuery: (value: string) => void; runSearch: () => void; onOpenDocument: (id: string) => void; uploading: boolean; uploadFile: (file: File) => void }) {
+  return <section className="screen wide-screen"><div className="page-panel"><div className="documents-head"><div><h1>{title}</h1><p>{documents.length} документов</p></div><div className="head-actions"><button className="ghost-button"><Bell size={16} />Лента</button></div></div><div className="filter-row"><label className="searchbox"><Search size={18} /><input value={query} onChange={(event) => setQuery(event.target.value)} onKeyDown={(event) => event.key === "Enter" && runSearch()} placeholder="Поиск документов..." /></label><button className="filter-button">Все типы</button><button className="filter-button">Все проекты</button><button className="filter-button">Все авторы</button><button className="filter-button"><Sparkles size={16} />AI фильтр</button><label className="upload-button table-upload"><Plus size={16} />{uploading ? "Загрузка..." : "Загрузить документ"}<input type="file" onChange={(event) => event.target.files?.[0] && uploadFile(event.target.files[0])} /></label></div><div className="suggestions"><button>Покажи договоры за 2024 год</button><button>Документы с истекающим сроком действия</button><button>Финансовые отчёты за последний квартал</button></div><div className="documents-table"><div className="table-row table-header"><span>Название</span><span>Тип</span><span>Хранилище</span><span>Изменено</span><span>AI</span><span>Статус</span></div>{documents.map((document) => <button className="table-row" key={document.id} onClick={() => onOpenDocument(document.id)}><span className="file-name"><FileIcon filename={document.filename} />{document.filename}</span><span>{fileTypeLabel(document.filename)}</span><span>{document.storage_mode === "external" ? "Яндекс Диск" : "Сервер"}</span><span>—</span><span>{document.analysis_status}</span><span><em>{document.preview_status}</em></span></button>)}{!documents.length && <div className="empty-state">Документы пока не найдены.</div>}</div></div></section>
 }
 
-function EditableEventCard({ proposal, onConfirmed }: { proposal: EventProposal; onConfirmed: (proposal: EventProposal) => void }) {
-  const [title, setTitle] = useState(proposal.title)
-  const [startsAt, setStartsAt] = useState(proposal.starts_at)
-  const [description, setDescription] = useState(proposal.description ?? "")
-  const [priority, setPriority] = useState(proposal.priority ?? "normal")
-  const [saving, setSaving] = useState(false)
+function EntityScreen({ kind, title, group, selected, onSelect, documents, onOpenDocument }: { kind: EntityKind; title: string; group: Group | null | undefined; selected: { name: string; document_count: number } | null; onSelect: (name: string) => void; documents: DocumentItem[]; onOpenDocument: (id: string) => void }) {
+  const items = group?.items ?? []
+  return <section className="screen wide-screen"><div className="entity-layout"><div className="entity-list-panel"><h1>{title}</h1><p>{entitySubtitle(kind)}</p><label className="searchbox entity-search"><Search size={17} /><input placeholder={entitySearchPlaceholder(kind)} /></label><p className="total-line">Всего: {items.length}</p><div className="entity-list">{items.map((item) => <button className={selected?.name === item.name ? "selected" : ""} key={item.name} onClick={() => onSelect(item.name)}><Avatar name={item.name} /><span><strong>{item.name}</strong><small>{shortName(item.name)}</small></span><em>{item.document_count} док.</em><ChevronRight size={17} /></button>)}</div></div><div className="entity-detail-panel">{selected ? <><div className="entity-card"><Avatar name={selected.name} large /><div><h2>{selected.name}</h2><p>{shortName(selected.name)}</p></div><span className="ai-pill">AI-обнаружен</span></div><div className="entity-meta"><div><span>Упоминаний в документах</span><strong>{selected.document_count}</strong></div><div><span>Тип</span><strong>{entityKindTitle(kind)}</strong></div></div><div className="related-docs"><h3>Документы ({documents.length || selected.document_count})</h3><div className="mini-table"><div className="mini-row mini-head"><span>Название</span><span>Тип</span><span>Хранилище</span><span>AI</span></div>{documents.map((document) => <button className="mini-row" key={document.id} onClick={() => onOpenDocument(document.id)}><span className="file-name"><FileIcon filename={document.filename} />{document.filename}</span><span>{fileTypeLabel(document.filename)}</span><span>{document.storage_mode === "external" ? "Яндекс Диск" : "Сервер"}</span><span>{document.analysis_status}</span></button>)}{!documents.length && <div className="empty-state">Документы этой категории появятся после AI-анализа содержимого.</div>}</div></div></> : <div className="empty-state">AI пока не нашёл сущности этого типа.</div>}</div></div></section>
+}
 
-  async function confirm() {
-    setSaving(true)
-    const response = await fetch(`${API_BASE}/api/v1/event-proposals/${proposal.id}/confirm`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      credentials: "include",
-      body: JSON.stringify({ title, starts_at: startsAt, description, priority }),
-    })
-    if (response.ok) onConfirmed(await response.json())
-    setSaving(false)
-  }
+function GroupsScreen({ groups }: { groups: Group[] }) {
+  return <section className="screen wide-screen"><div className="page-panel"><div className="documents-head"><div><h1>AI-группы</h1><p>Осмысленные категории, найденные в документах</p></div></div>{!groups.length && <div className="empty-state">AI-группы появятся после обработки документов.</div>}<div className="group-board">{groups.map((group) => <article key={group.kind}><span>{group.title}</span><div>{group.items.map((item) => <button key={item.name} type="button">{item.name}<em>{item.document_count}</em></button>)}</div></article>)}</div></div></section>
+}
 
-  return (
-    <article className="event-card">
-      <input value={title} onChange={(event) => setTitle(event.target.value)} />
-      <input value={startsAt} onChange={(event) => setStartsAt(event.target.value)} />
-      <textarea value={description} onChange={(event) => setDescription(event.target.value)} placeholder="Описание" />
-      <select value={priority} onChange={(event) => setPriority(event.target.value)}>
-        <option value="low">Низкий</option>
-        <option value="normal">Обычный</option>
-        <option value="high">Высокий</option>
-      </select>
-      <button disabled={proposal.confirmed || saving} onClick={confirm}>
-        {proposal.confirmed ? "Добавлено" : saving ? "Добавляем..." : "Добавить в календарь"}
-      </button>
-    </article>
-  )
+function IntegrationsScreen(props: { storageMode: "managed" | "yandex_disk"; setStorageMode: (mode: "managed" | "yandex_disk") => void; yandexStatus: YandexStatus | null; watchedPath: string; setWatchedPath: (path: string) => void; yandexVerificationCode: string; setYandexVerificationCode: (code: string) => void; connectYandexDisk: () => void; submitYandexVerificationCode: () => void; connectWatchedFolder: () => void; syncYandexSources: () => void; integrationNotice: string | null }) {
+  return <section className="screen narrow-screen"><div className="page-head"><h1>Интеграции</h1><p>Настройки хранения и синхронизации.</p></div><article className="panel integration-panel"><div className="panel-head"><div><h2>Хранение файлов</h2></div><span className={`status-badge ${props.storageMode === "managed" || props.yandexStatus?.connected ? "ok" : "warn"}`}>{props.storageMode === "managed" ? "Наше хранилище" : props.yandexStatus?.connected ? "Подключён" : "Не подключён"}</span></div><div className="storage-switch" role="group" aria-label="Режим хранения"><button className={props.storageMode === "managed" ? "selected" : ""} onClick={() => { props.setStorageMode("managed"); localStorage.setItem("docs_storage_mode", "managed") }}>Хранить у нас</button><button className={props.storageMode === "yandex_disk" ? "selected" : ""} onClick={() => { props.setStorageMode("yandex_disk"); localStorage.setItem("docs_storage_mode", "yandex_disk") }}>Мой Яндекс Диск</button></div><div className={`yandex-settings ${props.storageMode === "yandex_disk" ? "open" : "closed"}`} aria-hidden={props.storageMode !== "yandex_disk"}>{!props.yandexStatus?.connected && <div className="button-row"><button onClick={props.connectYandexDisk} disabled={!props.yandexStatus?.credentials_configured}>Авторизовать диск</button></div>}{!props.yandexStatus?.connected && <div className="code-row"><label>Код подтверждения<input value={props.yandexVerificationCode} onChange={(event) => props.setYandexVerificationCode(event.target.value)} placeholder="Код из Яндекса" /></label><button onClick={props.submitYandexVerificationCode} disabled={!props.yandexVerificationCode.trim()}>Подключить</button></div>}{props.yandexStatus?.connected && <div className="folder-row"><label>Папка на диске<input value={props.watchedPath} onChange={(event) => props.setWatchedPath(event.target.value)} placeholder="/Docs" /></label><button onClick={props.connectWatchedFolder}>Сохранить</button><button onClick={props.syncYandexSources}>Обновить</button></div>}{props.integrationNotice && <p className="notice">{props.integrationNotice}</p>}{!!(props.yandexStatus?.watched_sources ?? []).length && <div className="watched-list">{props.yandexStatus?.watched_sources.map((source) => <span key={source.id}>{source.root_path}</span>)}</div>}</div></article></section>
+}
+
+function EmptyPanel({ title, text }: { title: string; text: string }) {
+  return <section className="screen wide-screen"><div className="page-panel empty-page"><Box size={34} /><h1>{title}</h1><p>{text}</p></div></section>
 }
 
 function PreviewSurface({ document, config }: { document?: DocumentItem; config: OnlyOfficeConfig | null }) {
   const extension = document?.filename.split(".").pop()?.toLowerCase()
   const contentUrl = document?.asset_id ? platformUrl(FILES_API_BASE, `/api/v1/assets/${document.asset_id}/content`) : null
-
-  if (!document) {
-    return <div className="preview empty"><span>Предпросмотр</span><strong>Выберите документ</strong></div>
-  }
-
-  if (!contentUrl) {
-    return <div className="preview empty"><span>Предпросмотр</span><strong>{document.filename}</strong><small>Оригинал ещё не готов к просмотру</small></div>
-  }
-
-  if (extension === "pdf") {
-    return <iframe className="preview-frame" title={document.filename} src={contentUrl} />
-  }
-
-  if (["png", "jpg", "jpeg", "gif", "webp", "svg"].includes(extension ?? "")) {
-    return <img className="preview-image" alt={document.filename} src={contentUrl} />
-  }
-
-  if (["docx", "xlsx", "pptx", "doc", "xls", "ppt"].includes(extension ?? "") && config) {
-    return <OnlyOfficePreview config={config} />
-  }
-
+  if (!document) return <div className="preview empty"><span>Предпросмотр</span><strong>Выберите документ</strong></div>
+  if (!contentUrl) return <div className="preview empty"><span>Предпросмотр</span><strong>{document.filename}</strong><small>Оригинал ещё не готов к просмотру</small></div>
+  if (extension === "pdf") return <iframe className="preview-frame" title={document.filename} src={`${contentUrl}#toolbar=0&navpanes=0`} />
+  if (["png", "jpg", "jpeg", "gif", "webp", "svg"].includes(extension ?? "")) return <img className="preview-image" alt={document.filename} src={contentUrl} />
+  if (["docx", "xlsx", "pptx", "doc", "xls", "ppt"].includes(extension ?? "")) return config ? <OnlyOfficePreview config={config} /> : <div className="preview empty"><strong>{document.filename}</strong><small>Готовим предпросмотр Office-документа…</small></div>
   return <div className="preview empty"><span>Предпросмотр</span><strong>{document.filename}</strong><small>Для этого формата готовится viewer</small></div>
 }
 
@@ -569,11 +500,8 @@ function OnlyOfficePreview({ config }: { config: OnlyOfficeConfig }) {
     const scriptId = "onlyoffice-docs-api"
     const mount = () => {
       if (cancelled || !window.DocsAPI) return
-      editor = new window.DocsAPI.DocEditor("onlyoffice-preview", {
-        ...config,
-        width: "100%",
-        height: "100%",
-      })
+      const id = `onlyoffice-preview-${config.document.key}`
+      editor = new window.DocsAPI.DocEditor(id, { ...config, width: "100%", height: "100%" })
     }
     const existing = document.getElementById(scriptId) as HTMLScriptElement | null
     if (existing) {
@@ -591,6 +519,38 @@ function OnlyOfficePreview({ config }: { config: OnlyOfficeConfig }) {
       editor?.destroyEditor?.()
     }
   }, [config])
-
-  return <div className="onlyoffice-preview" id="onlyoffice-preview" />
+  return <div className="onlyoffice-preview" id={`onlyoffice-preview-${config.document.key}`} />
 }
+
+function EditableEventCard({ proposal, onConfirmed }: { proposal: EventProposal; onConfirmed: (proposal: EventProposal) => void }) {
+  const [title, setTitle] = useState(proposal.title)
+  const [startsAt, setStartsAt] = useState(proposal.starts_at)
+  const [description, setDescription] = useState(proposal.description ?? "")
+  const [priority, setPriority] = useState(proposal.priority ?? "normal")
+  const [saving, setSaving] = useState(false)
+  async function confirm() {
+    setSaving(true)
+    const response = await fetch(`${API_BASE}/api/v1/event-proposals/${proposal.id}/confirm`, { method: "POST", headers: { "Content-Type": "application/json" }, credentials: "include", body: JSON.stringify({ title, starts_at: startsAt, description, priority }) })
+    if (response.ok) onConfirmed(await response.json())
+    setSaving(false)
+  }
+  return <article className="event-card"><input value={title} onChange={(event) => setTitle(event.target.value)} /><input value={startsAt} onChange={(event) => setStartsAt(event.target.value)} /><textarea value={description} onChange={(event) => setDescription(event.target.value)} placeholder="Описание" /><select value={priority} onChange={(event) => setPriority(event.target.value)}><option value="low">Низкий</option><option value="normal">Обычный</option><option value="high">Высокий</option></select><button disabled={proposal.confirmed || saving} onClick={confirm}>{proposal.confirmed ? "Добавлено" : saving ? "Добавляем..." : "Добавить в календарь"}</button></article>
+}
+
+function isUsefulGroupName(name: string) {
+  const normalized = name.trim()
+  if (normalized.length < 3) return false
+  if (/^\d+([.,]\d+)?$/.test(normalized)) return false
+  if (/^[\d\s.,:;№#/-]+$/.test(normalized)) return false
+  return /[a-zа-яё]/i.test(normalized)
+}
+function sectionToEntityKind(section: ActiveSection): EntityKind | null { return section === "people" ? "person" : section === "companies" ? "company" : section === "projects" ? "project" : section === "finance" ? "finance" : null }
+function entityTokens(name: string) { return name.toLowerCase().split(/\s+/).filter((part) => part.length > 3).slice(0, 4) }
+function shortName(name: string) { const parts = name.split(/\s+/).filter(Boolean); return parts.length >= 3 ? `${parts[0]} ${parts[1][0]}.${parts[2][0]}.` : name }
+function initials(name: string) { return name.split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]).join("").toUpperCase() || "AI" }
+function Avatar({ name, large = false }: { name: string; large?: boolean }) { return <span className={large ? "avatar large" : "avatar"}>{initials(name)}</span> }
+function entitySubtitle(kind: EntityKind) { return kind === "person" ? "Все физические лица, упомянутые в документах" : kind === "company" ? "Организации и контрагенты из документов" : kind === "project" ? "Проекты, связанные с документами" : "Финансовые сущности и обязательства" }
+function entitySearchPlaceholder(kind: EntityKind) { return kind === "person" ? "Поиск людей..." : kind === "company" ? "Поиск компаний..." : kind === "project" ? "Поиск проектов..." : "Поиск финансов..." }
+function entityKindTitle(kind: EntityKind) { return kind === "person" ? "Человек" : kind === "company" ? "Компания" : kind === "project" ? "Проект" : kind === "finance" ? "Финансы" : "AI-группа" }
+function fileTypeLabel(filename: string) { const ext = filename.split(".").pop()?.toLowerCase(); if (ext === "pdf") return "PDF"; if (["doc", "docx"].includes(ext ?? "")) return "Документ"; if (["xls", "xlsx"].includes(ext ?? "")) return "Таблица"; if (["ppt", "pptx"].includes(ext ?? "")) return "Презентация"; return "Файл" }
+function FileIcon({ filename }: { filename: string }) { const ext = filename.split(".").pop()?.toLowerCase(); if (["xls", "xlsx"].includes(ext ?? "")) return <FileSpreadsheet size={18} className="file-icon sheet" />; return <FileText size={18} className={ext === "pdf" ? "file-icon pdf" : "file-icon doc"} /> }

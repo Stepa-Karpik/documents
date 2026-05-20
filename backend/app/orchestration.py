@@ -74,10 +74,12 @@ class DocumentOrchestrator:
         self.repository.attach_analysis(document_id=document_id, summary=summary, entities=entities)
         text = " ".join([document.filename, summary, *entities])
         self.search_client.index_document(document_id=document_id, owner_subject_id=document.owner_subject_id, text=text)
+        structured_entities = getattr(self, '_last_structured_entities', None) or []
+        indexed_entities = structured_entities if structured_entities else [{"kind": "topic", "name": entity} for entity in entities]
         self.search_client.index_entities(
             document_id=document_id,
             owner_subject_id=document.owner_subject_id,
-            entities=[{"kind": "topic", "name": entity} for entity in entities],
+            entities=indexed_entities,
         )
 
     def process_document(self, document: DocumentModel) -> None:
@@ -92,6 +94,8 @@ class DocumentOrchestrator:
         except AttributeError:
             # Backwards-compatible with simpler clients used by older flows/tests.
             return
+        self._last_structured_entities = analysis.get("structured_entities") or []
         self.complete_analysis(document_id=document.id, summary=analysis["summary"], entities=analysis["entities"])
+        self._last_structured_entities = []
         for event in analysis.get("events", []):
             self.repository.create_event_proposal(document_id=document.id, **event)

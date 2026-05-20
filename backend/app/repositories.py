@@ -125,6 +125,9 @@ class DocumentRepository(DocumentRepository):
         self.session.refresh(record)
         return record
 
+    def get_analysis(self, document_id: str) -> AnalysisRecordModel | None:
+        return self.session.get(AnalysisRecordModel, document_id)
+
     def search(self, *, owner_subject_id: str, query: str) -> list[SearchHit]:
         query_tokens = _tokenize(query)
         stmt = select(DocumentModel, AnalysisRecordModel).join(AnalysisRecordModel, AnalysisRecordModel.document_id == DocumentModel.id).where(DocumentModel.owner_subject_id == owner_subject_id)

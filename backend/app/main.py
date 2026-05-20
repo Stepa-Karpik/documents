@@ -134,20 +134,22 @@ def register_managed_document(payload: ManagedDocumentCreate, session: SessionDe
         document = _build_orchestrator(repo).register_uploaded_managed_document(**payload.model_dump())
     else:
         document = repo.create_managed_document(**payload.model_dump(exclude={"asset_id"}))
-    return _document_to_dict(document)
+    return _document_to_dict(document, repo=DocumentRepository(session))
 
 
 @app.get("/api/v1/documents")
 def list_documents(owner_subject_id: str, session: SessionDep) -> list[dict]:
-    return [_document_to_dict(document) for document in DocumentRepository(session).list_documents(owner_subject_id)]
+    repo = DocumentRepository(session)
+    return [_document_to_dict(document, repo=repo) for document in repo.list_documents(owner_subject_id)]
 
 
 @app.get("/api/v1/documents/{document_id}")
 def get_document(document_id: str, session: SessionDep) -> dict:
-    document = DocumentRepository(session).get_document(document_id)
+    repo = DocumentRepository(session)
+    document = repo.get_document(document_id)
     if document is None:
         raise HTTPException(status_code=404, detail="document not found")
-    return _document_to_dict(document)
+    return _document_to_dict(document, repo=repo)
 
 
 @app.post("/api/v1/documents/{document_id}/preview", status_code=status.HTTP_201_CREATED)
@@ -162,7 +164,7 @@ def discover_external_document(payload: ExternalDocumentDiscover, session: Sessi
     if payload.asset_id is not None:
         document = repo.assign_asset(document.id, asset_id=payload.asset_id)
         _build_orchestrator(repo).process_document(document)
-    return _document_to_dict(document)
+    return _document_to_dict(document, repo=repo)
 
 
 @app.post("/api/v1/watched-sources", status_code=status.HTTP_201_CREATED)
@@ -223,7 +225,17 @@ def list_groups(owner_subject_id: str) -> list[dict]:
     return _build_search_client().list_groups(owner_subject_id=owner_subject_id)
 
 
-def _document_to_dict(document) -> dict:
+def _document_to_dict(document, repo: DocumentRepository | None = None) -> dict:
+    analysis = repo.get_analysis(document.id) if repo is not None else None
+    entities = []
+    summary = None
+    if analysis is not None:
+        import json
+        summary = analysis.summary
+        try:
+            entities = json.loads(analysis.entities_json)
+        except Exception:
+            entities = []
     return {
         "id": document.id,
         "owner_subject_id": document.owner_subject_id,
@@ -238,6 +250,8 @@ def _document_to_dict(document) -> dict:
         "preview_status": document.preview_status,
         "analysis_status": document.analysis_status,
         "analysis_attempts": document.analysis_attempts,
+        "analysis_summary": summary,
+        "analysis_entities": entities,
     }
 
 
