@@ -10,6 +10,8 @@ class SessionExchangeResult:
     email: str | None = None
     username: str | None = None
     display_name: str | None = None
+    role: str | None = None
+    is_admin: bool | None = None
 
 
 class HttpIdentityClient:

@@ -5,7 +5,6 @@ import { useEffect, useMemo, useState } from "react"
 import {
   Bell,
   Box,
-  BriefcaseBusiness,
   Building2,
   ChevronRight,
   Clock3,
@@ -17,7 +16,6 @@ import {
   History,
   Languages,
   Link2,
-  Moon,
   Plus,
   Search,
   Send,
@@ -43,7 +41,7 @@ function platformUrl(base: string, apiPath: string) {
 const nav = [
   ["recent", Clock3, "Последние"],
   ["documents", FileText, "Все документы"],
-  ["groups", Sparkles, "AI-группы"],
+  ["cities", Globe2, "Города"],
   ["projects", FolderKanban, "Проекты"],
   ["companies", Building2, "Компании"],
   ["people", Users, "Люди"],
@@ -52,8 +50,8 @@ const nav = [
   ["integrations", Link2, "Интеграции"],
 ] as const
 
-type ActiveSection = typeof nav[number][0] | "finance" | "feed" | "support"
-type EntityKind = "person" | "company" | "project" | "finance" | "topic"
+type ActiveSection = typeof nav[number][0] | "finance" | "feed" | "support" | "groups"
+type EntityKind = "person" | "company" | "project" | "finance" | "city"
 
 type DocumentItem = {
   id: string
@@ -110,6 +108,9 @@ declare global {
 export default function DocumentsWorkspace({ initialSection = "recent" }: { initialSection?: ActiveSection }) {
   const [subjectId, setSubjectId] = useState<string | null>(null)
   const [accountLabel, setAccountLabel] = useState<string | null>(null)
+  const [isAdmin, setIsAdmin] = useState(false)
+  const [locale, setLocale] = useState<"ru" | "en">("ru")
+  const [theme, setTheme] = useState<"dark" | "light">("dark")
   const [documents, setDocuments] = useState<DocumentItem[]>([])
   const [query, setQuery] = useState("")
   const [hits, setHits] = useState<SearchHit[]>([])
@@ -127,6 +128,27 @@ export default function DocumentsWorkspace({ initialSection = "recent" }: { init
   const [integrationNotice, setIntegrationNotice] = useState<string | null>(null)
   const [yandexVerificationCode, setYandexVerificationCode] = useState("")
   const [selectedEntityName, setSelectedEntityName] = useState<string | null>(null)
+  const [typeFilter, setTypeFilter] = useState("all")
+  const [projectFilter, setProjectFilter] = useState("all")
+  const [storageFilter, setStorageFilter] = useState("all")
+
+  const t = (ru: string, en: string) => locale === "ru" ? ru : en
+
+  useEffect(() => {
+    const savedTheme = localStorage.getItem("docs_theme")
+    const savedLocale = localStorage.getItem("docs_locale")
+    if (savedTheme === "dark" || savedTheme === "light") setTheme(savedTheme)
+    if (savedLocale === "ru" || savedLocale === "en") setLocale(savedLocale)
+  }, [])
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme
+    localStorage.setItem("docs_theme", theme)
+  }, [theme])
+
+  useEffect(() => {
+    localStorage.setItem("docs_locale", locale)
+  }, [locale])
 
   useEffect(() => {
     const saved = localStorage.getItem("docs_storage_mode")
@@ -136,9 +158,10 @@ export default function DocumentsWorkspace({ initialSection = "recent" }: { init
   useEffect(() => {
     fetch(`${API_BASE}/api/v1/auth/session`, { credentials: "include" })
       .then((response) => response.ok ? response.json() : Promise.reject())
-      .then((session: { subject_id: string; username?: string | null; email?: string | null; display_name?: string | null }) => {
+      .then((session: { subject_id: string; username?: string | null; email?: string | null; display_name?: string | null; role?: string | null; is_admin?: boolean | null }) => {
         setSubjectId(session.subject_id)
         setAccountLabel(session.display_name || session.username || session.email || session.subject_id)
+        setIsAdmin(Boolean(session.is_admin || session.role === "admin"))
       })
       .catch(() => {
         const returnTo = encodeURIComponent(window.location.href)
@@ -201,9 +224,16 @@ export default function DocumentsWorkspace({ initialSection = "recent" }: { init
       const allowed = new Set(hits.map((hit) => hit.document_id))
       items = items.filter((document) => allowed.has(document.id))
     }
+    if (query.trim() && !hits.length) {
+      const needle = query.trim().toLowerCase()
+      items = items.filter((document) => [document.filename, document.analysis_summary ?? "", ...(document.analysis_entities ?? [])].join(" ").toLowerCase().includes(needle))
+    }
+    if (typeFilter !== "all") items = items.filter((document) => fileTypeLabel(document.filename) === typeFilter)
+    if (storageFilter !== "all") items = items.filter((document) => document.storage_mode === storageFilter)
+    if (projectFilter !== "all") items = items.filter((document) => [document.filename, document.analysis_summary ?? "", ...(document.analysis_entities ?? [])].join(" ").toLowerCase().includes(projectFilter.toLowerCase()))
     if (activeSection === "recent") return items.slice(0, 10)
     return items
-  }, [documents, hits, activeSection])
+  }, [documents, hits, activeSection, query, typeFilter, storageFilter, projectFilter])
 
   const meaningfulGroups = useMemo(() => groups.map((group) => ({
     ...group,
@@ -388,7 +418,8 @@ export default function DocumentsWorkspace({ initialSection = "recent" }: { init
     if (response.ok) setHits(await response.json())
   }
 
-  const sectionTitle = nav.find(([key]) => key === activeSection)?.[2] ?? "Документы"
+  const sectionTitle = nav.find(([key]) => key === activeSection)?.[2] ?? (activeSection === "finance" ? t("Финансы", "Finance") : t("Документы", "Documents"))
+  const projectOptions = useMemo(() => meaningfulGroups.find((group) => group.kind === "project")?.items.map((item) => item.name) ?? [], [meaningfulGroups])
 
   return (
     <main className="workspace-shell">
@@ -398,7 +429,7 @@ export default function DocumentsWorkspace({ initialSection = "recent" }: { init
           <div><strong>Nerior Docs</strong><span>digital vault</span></div>
         </div>
         <div className="nav-card">
-          <span className="nav-caption">Навигация</span>
+          <span className="nav-caption">{t("Навигация", "Navigation")}</span>
           <nav>{nav.map(([key, Icon, label]) => (
             <Link className={activeSection === key ? "active" : ""} key={key} href={`/${key}`}>
               <Icon size={16} />{label}
@@ -406,18 +437,18 @@ export default function DocumentsWorkspace({ initialSection = "recent" }: { init
           ))}</nav>
         </div>
         <div className="sidebar-spacer" />
-        <Link className="side-link" href="/support"><Globe2 size={15} />Поддержка</Link>
-        <button className="side-link" type="button"><Languages size={15} />RU</button>
-        <button className="side-link" type="button"><Sun size={15} />Светлая тема</button>
+        <Link className="side-link" href="/support"><Globe2 size={15} />{t("Поддержка", "Support")}</Link>
+        <button className="side-link" type="button" onClick={() => setLocale(locale === "ru" ? "en" : "ru")}><Languages size={15} />{locale.toUpperCase()}</button>
+        <button className="side-link" type="button" onClick={() => setTheme(theme === "dark" ? "light" : "dark")}><Sun size={15} />{theme === "dark" ? t("Светлая тема", "Light theme") : t("Тёмная тема", "Dark theme")}</button>
         <div className="account-pill"><UserRound size={15} /><span>{accountLabel ?? "Нужен вход"}</span></div>
-        <button className="side-link danger" type="button" onClick={() => { window.location.href = "https://auth.nerior.ru/logout" }}><Send size={15} />Выйти</button>
+        <button className="side-link danger" type="button" onClick={() => { window.location.href = "https://auth.nerior.ru/logout" }}><Send size={15} />{t("Выйти", "Logout")}</button>
       </aside>
 
       <section className="content">
         <header className="topbar">
           <div className="topbar-left"><div className="topbar-icon"><FileText size={16} /></div><div><strong>{sectionTitle}</strong><span>Интеллектуальный архив Nerior</span></div></div>
           <div className="topbar-actions">
-            {activeSection !== "integrations" && <label className="upload-button top-upload"><Plus size={16} />{uploading ? "Загрузка..." : "Загрузить файл"}<input type="file" onChange={(event) => event.target.files?.[0] && uploadFile(event.target.files[0])} /></label>}
+            <Link className="ghost-button" href="/feed"><Bell size={16} />{t("Лента", "Feed")}</Link>{isAdmin && <a className="ghost-button" href="https://admin.nerior.ru"><Box size={16} />{t("Админ панель", "Admin")}</a>}
           </div>
         </header>
 
@@ -425,6 +456,10 @@ export default function DocumentsWorkspace({ initialSection = "recent" }: { init
           <IntegrationsScreen storageMode={storageMode} setStorageMode={setStorageMode} yandexStatus={yandexStatus} watchedPath={watchedPath} setWatchedPath={setWatchedPath} yandexVerificationCode={yandexVerificationCode} setYandexVerificationCode={setYandexVerificationCode} connectYandexDisk={connectYandexDisk} submitYandexVerificationCode={submitYandexVerificationCode} connectWatchedFolder={connectWatchedFolder} syncYandexSources={syncYandexSources} integrationNotice={integrationNotice} />
         ) : activeSection === "groups" ? (
           <GroupsScreen groups={meaningfulGroups} />
+        ) : activeSection === "feed" ? (
+          <FeedScreen locale={locale} />
+        ) : activeSection === "support" ? (
+          <SupportScreen locale={locale} />
         ) : entityKind ? (
           <EntityScreen kind={entityKind} title={sectionTitle} group={entityGroup} selected={selectedEntity ?? null} onSelect={setSelectedEntityName} documents={entityDocuments} onOpenDocument={(id) => { setSelectedId(id); setPreviewOpen(true) }} />
         ) : activeSection === "trash" ? (
@@ -432,7 +467,7 @@ export default function DocumentsWorkspace({ initialSection = "recent" }: { init
         ) : activeSection === "history" ? (
           <EmptyPanel title="История" text="Здесь будет лента загрузок, просмотров, синхронизаций и AI-обработки." />
         ) : (
-          <DocumentsTable title={activeSection === "recent" ? "Последние" : "Все документы"} documents={filteredDocuments} query={query} setQuery={setQuery} runSearch={runSearch} onOpenDocument={(id) => { setSelectedId(id); setPreviewOpen(true) }} uploading={uploading} uploadFile={uploadFile} />
+          <DocumentsTable title={activeSection === "recent" ? t("Последние", "Recent") : t("Все документы", "All documents")} documents={filteredDocuments} allDocuments={documents} query={query} setQuery={setQuery} runSearch={runSearch} onOpenDocument={(id) => { setSelectedId(id); setPreviewOpen(true) }} uploading={uploading} uploadFile={uploadFile} typeFilter={typeFilter} setTypeFilter={setTypeFilter} projectFilter={projectFilter} setProjectFilter={setProjectFilter} projectOptions={projectOptions} storageFilter={storageFilter} setStorageFilter={setStorageFilter} locale={locale} />
         )}
       </section>
 
@@ -449,7 +484,7 @@ export default function DocumentsWorkspace({ initialSection = "recent" }: { init
             <div className="modal-body">
               <PreviewSurface document={selected} config={previewConfig} />
               <aside className="modal-insights">
-                <section><h3>Статус</h3><p>Preview: {selected.preview_status}<br />Analysis: {selected.analysis_status}</p></section>
+                <section><h3>{t("Статус", "Status")}</h3><p><StatusBadge status={selected.preview_status} locale={locale} /><br /><StatusBadge status={selected.analysis_status} locale={locale} /></p></section>
                 <section><h3>AI summary</h3><p>{selected.analysis_summary || "После обработки здесь появятся summary, сущности и найденные события."}</p></section>
                 <section><h3>Найденные события</h3>{!eventProposals.length && <p>Пока нет предложений из документа.</p>}{eventProposals.map((proposal) => <EditableEventCard key={proposal.id} proposal={proposal} onConfirmed={(updated) => setEventProposals((items) => items.map((item) => item.id === updated.id ? updated : item))} />)}</section>
               </aside>
@@ -461,8 +496,10 @@ export default function DocumentsWorkspace({ initialSection = "recent" }: { init
   )
 }
 
-function DocumentsTable({ title, documents, query, setQuery, runSearch, onOpenDocument, uploading, uploadFile }: { title: string; documents: DocumentItem[]; query: string; setQuery: (value: string) => void; runSearch: () => void; onOpenDocument: (id: string) => void; uploading: boolean; uploadFile: (file: File) => void }) {
-  return <section className="screen wide-screen"><div className="page-panel"><div className="documents-head"><div><h1>{title}</h1><p>{documents.length} документов</p></div><div className="head-actions"><button className="ghost-button"><Bell size={16} />Лента</button></div></div><div className="filter-row"><label className="searchbox"><Search size={18} /><input value={query} onChange={(event) => setQuery(event.target.value)} onKeyDown={(event) => event.key === "Enter" && runSearch()} placeholder="Поиск документов..." /></label><button className="filter-button">Все типы</button><button className="filter-button">Все проекты</button><button className="filter-button">Все авторы</button><button className="filter-button"><Sparkles size={16} />AI фильтр</button><label className="upload-button table-upload"><Plus size={16} />{uploading ? "Загрузка..." : "Загрузить документ"}<input type="file" onChange={(event) => event.target.files?.[0] && uploadFile(event.target.files[0])} /></label></div><div className="suggestions"><button>Покажи договоры за 2024 год</button><button>Документы с истекающим сроком действия</button><button>Финансовые отчёты за последний квартал</button></div><div className="documents-table"><div className="table-row table-header"><span>Название</span><span>Тип</span><span>Хранилище</span><span>Изменено</span><span>AI</span><span>Статус</span></div>{documents.map((document) => <button className="table-row" key={document.id} onClick={() => onOpenDocument(document.id)}><span className="file-name"><FileIcon filename={document.filename} />{document.filename}</span><span>{fileTypeLabel(document.filename)}</span><span>{document.storage_mode === "external" ? "Яндекс Диск" : "Сервер"}</span><span>—</span><span>{document.analysis_status}</span><span><em>{document.preview_status}</em></span></button>)}{!documents.length && <div className="empty-state">Документы пока не найдены.</div>}</div></div></section>
+function DocumentsTable({ title, documents, allDocuments, query, setQuery, runSearch, onOpenDocument, uploading, uploadFile, typeFilter, setTypeFilter, projectFilter, setProjectFilter, projectOptions, storageFilter, setStorageFilter, locale }: { title: string; documents: DocumentItem[]; allDocuments: DocumentItem[]; query: string; setQuery: (value: string) => void; runSearch: () => void; onOpenDocument: (id: string) => void; uploading: boolean; uploadFile: (file: File) => void; typeFilter: string; setTypeFilter: (value: string) => void; projectFilter: string; setProjectFilter: (value: string) => void; projectOptions: string[]; storageFilter: string; setStorageFilter: (value: string) => void; locale: "ru" | "en" }) {
+  const t = (ru: string, en: string) => locale === "ru" ? ru : en
+  const typeOptions = Array.from(new Set(allDocuments.map((document) => fileTypeLabel(document.filename)))).sort()
+  return <section className="screen wide-screen"><div className="page-panel"><div className="documents-head"><div><h1>{title}</h1><p>{documents.length} {t("документов", "documents")}</p></div></div><div className="filter-row"><label className="searchbox"><Search size={18} /><input value={query} onChange={(event) => setQuery(event.target.value)} onKeyDown={(event) => event.key === "Enter" && runSearch()} placeholder={t("Поиск по названию и содержанию...", "Search by name and content...")} /></label><select className="filter-select" value={typeFilter} onChange={(event) => setTypeFilter(event.target.value)}><option value="all">{t("Все типы", "All types")}</option>{typeOptions.map((type) => <option key={type} value={type}>{type}</option>)}</select><select className="filter-select" value={projectFilter} onChange={(event) => setProjectFilter(event.target.value)}><option value="all">{t("Все проекты", "All projects")}</option>{projectOptions.map((project) => <option key={project} value={project}>{project}</option>)}</select><select className="filter-select" value={storageFilter} onChange={(event) => setStorageFilter(event.target.value)}><option value="all">{t("Хранилище", "Storage")}</option><option value="managed">{t("Сервер", "Server")}</option><option value="external">{t("Яндекс Диск", "Yandex Disk")}</option></select><label className="upload-button table-upload"><Plus size={16} />{uploading ? t("Загрузка...", "Uploading...") : t("Загрузить файл", "Upload file")}<input type="file" onChange={(event) => event.target.files?.[0] && uploadFile(event.target.files[0])} /></label></div><div className="documents-table"><div className="table-row table-header"><span>{t("Название", "Name")}</span><span>{t("Тип", "Type")}</span><span>{t("Хранилище", "Storage")}</span><span>{t("Изменено", "Modified")}</span><span>AI</span><span>{t("Статус", "Status")}</span></div>{documents.map((document) => <button className="table-row" key={document.id} onClick={() => onOpenDocument(document.id)}><span className="file-name"><FileIcon filename={document.filename} />{document.filename}</span><span>{fileTypeLabel(document.filename)}</span><span>{document.storage_mode === "external" ? t("Яндекс Диск", "Yandex Disk") : t("Сервер", "Server")}</span><span>—</span><span><StatusBadge status={document.analysis_status} locale={locale} /></span><span><StatusBadge status={document.preview_status} locale={locale} /></span></button>)}{!documents.length && <div className="empty-state">{t("Документы пока не найдены.", "No documents found yet.")}</div>}</div></div></section>
 }
 
 function EntityScreen({ kind, title, group, selected, onSelect, documents, onOpenDocument }: { kind: EntityKind; title: string; group: Group | null | undefined; selected: { name: string; document_count: number } | null; onSelect: (name: string) => void; documents: DocumentItem[]; onOpenDocument: (id: string) => void }) {
@@ -475,7 +512,7 @@ function GroupsScreen({ groups }: { groups: Group[] }) {
 }
 
 function IntegrationsScreen(props: { storageMode: "managed" | "yandex_disk"; setStorageMode: (mode: "managed" | "yandex_disk") => void; yandexStatus: YandexStatus | null; watchedPath: string; setWatchedPath: (path: string) => void; yandexVerificationCode: string; setYandexVerificationCode: (code: string) => void; connectYandexDisk: () => void; submitYandexVerificationCode: () => void; connectWatchedFolder: () => void; syncYandexSources: () => void; integrationNotice: string | null }) {
-  return <section className="screen narrow-screen"><div className="page-head"><h1>Интеграции</h1><p>Настройки хранения и синхронизации.</p></div><article className="panel integration-panel"><div className="panel-head"><div><h2>Хранение файлов</h2></div><span className={`status-badge ${props.storageMode === "managed" || props.yandexStatus?.connected ? "ok" : "warn"}`}>{props.storageMode === "managed" ? "Наше хранилище" : props.yandexStatus?.connected ? "Подключён" : "Не подключён"}</span></div><div className="storage-switch" role="group" aria-label="Режим хранения"><button className={props.storageMode === "managed" ? "selected" : ""} onClick={() => { props.setStorageMode("managed"); localStorage.setItem("docs_storage_mode", "managed") }}>Хранить у нас</button><button className={props.storageMode === "yandex_disk" ? "selected" : ""} onClick={() => { props.setStorageMode("yandex_disk"); localStorage.setItem("docs_storage_mode", "yandex_disk") }}>Мой Яндекс Диск</button></div><div className={`yandex-settings ${props.storageMode === "yandex_disk" ? "open" : "closed"}`} aria-hidden={props.storageMode !== "yandex_disk"}>{!props.yandexStatus?.connected && <div className="button-row"><button onClick={props.connectYandexDisk} disabled={!props.yandexStatus?.credentials_configured}>Авторизовать диск</button></div>}{!props.yandexStatus?.connected && <div className="code-row"><label>Код подтверждения<input value={props.yandexVerificationCode} onChange={(event) => props.setYandexVerificationCode(event.target.value)} placeholder="Код из Яндекса" /></label><button onClick={props.submitYandexVerificationCode} disabled={!props.yandexVerificationCode.trim()}>Подключить</button></div>}{props.yandexStatus?.connected && <div className="folder-row"><label>Папка на диске<input value={props.watchedPath} onChange={(event) => props.setWatchedPath(event.target.value)} placeholder="/Docs" /></label><button onClick={props.connectWatchedFolder}>Сохранить</button><button onClick={props.syncYandexSources}>Обновить</button></div>}{props.integrationNotice && <p className="notice">{props.integrationNotice}</p>}{!!(props.yandexStatus?.watched_sources ?? []).length && <div className="watched-list">{props.yandexStatus?.watched_sources.map((source) => <span key={source.id}>{source.root_path}</span>)}</div>}</div></article></section>
+  return <section className="screen narrow-screen"><div className="page-head"><h1>Интеграции</h1><p>Настройки хранения и синхронизации.</p></div><article className="panel integration-panel"><div className="panel-head"><div><h2>Хранение файлов</h2></div><span className={`status-badge ${props.storageMode === "managed" || props.yandexStatus?.connected ? "ok" : "warn"}`}>{props.storageMode === "managed" ? "Наше хранилище" : props.yandexStatus?.connected ? "Подключён" : "Не подключён"}</span></div><div className="storage-switch" role="group" aria-label="Режим хранения"><button className={props.storageMode === "managed" ? "selected" : ""} onClick={() => { props.setStorageMode("managed"); localStorage.setItem("docs_storage_mode", "managed") }}>Хранить у нас</button><button className={props.storageMode === "yandex_disk" ? "selected" : ""} onClick={() => { props.setStorageMode("yandex_disk"); localStorage.setItem("docs_storage_mode", "yandex_disk") }}>Мой Яндекс Диск</button></div><div className={`yandex-settings ${props.storageMode === "yandex_disk" ? "open" : "closed"}`} aria-hidden={props.storageMode !== "yandex_disk"}>{!props.yandexStatus?.connected && <div className="button-row"><button onClick={props.connectYandexDisk} disabled={!props.yandexStatus?.credentials_configured}>Авторизовать диск</button></div>}{!props.yandexStatus?.connected && <div className="code-row"><label>Код подтверждения<input value={props.yandexVerificationCode} onChange={(event) => props.setYandexVerificationCode(event.target.value)} placeholder="Код из Яндекса" /></label><button onClick={props.submitYandexVerificationCode} disabled={!props.yandexVerificationCode.trim()}>Подключить</button></div>}{props.yandexStatus?.connected && <div className="folder-row"><label>Папка на диске<input value={props.watchedPath} onChange={(event) => props.setWatchedPath(event.target.value)} placeholder="/Docs" /></label><button onClick={props.connectWatchedFolder}>Сохранить</button><button onClick={props.syncYandexSources}>Обновить</button></div>}{props.integrationNotice && <p className="notice">{props.integrationNotice}</p>}</div></article></section>
 }
 
 function EmptyPanel({ title, text }: { title: string; text: string }) {
@@ -522,6 +559,28 @@ function OnlyOfficePreview({ config }: { config: OnlyOfficeConfig }) {
   return <div className="onlyoffice-preview" id={`onlyoffice-preview-${config.document.key}`} />
 }
 
+function StatusBadge({ status, locale }: { status: string; locale: "ru" | "en" }) {
+  const map: Record<string, { ru: string; en: string; tone: string }> = {
+    queued: { ru: "В очереди", en: "Queued", tone: "queued" },
+    processing: { ru: "Обрабатывается", en: "Processing", tone: "processing" },
+    ready: { ru: "Готово", en: "Ready", tone: "ready" },
+    failed: { ru: "Ошибка", en: "Failed", tone: "failed" },
+    missed_original: { ru: "Удалён извне", en: "Deleted externally", tone: "failed" },
+  }
+  const item = map[status] ?? { ru: status, en: status, tone: "queued" }
+  return <span className={`status-chip ${item.tone}`}>{locale === "ru" ? item.ru : item.en}</span>
+}
+
+function FeedScreen({ locale }: { locale: "ru" | "en" }) {
+  const t = (ru: string, en: string) => locale === "ru" ? ru : en
+  return <section className="screen wide-screen"><div className="page-panel feed-panel"><div className="documents-head"><div><h1>{t("Лента", "Feed")}</h1><p>{t("Уведомления, синхронизации и события документов.", "Document notifications, syncs and events.")}</p></div></div><div className="empty-state">{t("Лента появится после первых действий с документами.", "The feed will appear after the first document actions.")}</div></div></section>
+}
+
+function SupportScreen({ locale }: { locale: "ru" | "en" }) {
+  const t = (ru: string, en: string) => locale === "ru" ? ru : en
+  return <section className="screen wide-screen"><div className="support-layout"><aside className="support-tickets"><h2>{t("Мои тикеты", "My tickets")}</h2><label className="searchbox"><Search size={16} /><input placeholder={t("Поиск по тикетам...", "Search tickets...")} /></label><button className="ticket-item selected"><span>{t("Новый вопрос", "New request")}</span><small>{t("Поддержка документов", "Documents support")}</small></button></aside><article className="support-chat"><header><div><h1>{t("Поддержка", "Support")}</h1><p>{t("Опишите проблему — сообщение попадёт в поддержку Nerior.", "Describe the issue — it will go to Nerior support.")}</p></div></header><div className="chat-empty">{t("Сообщений пока нет.", "No messages yet.")}</div><div className="chat-input"><input placeholder={t("Сообщение", "Message")} /><button><Send size={16} /></button></div></article></div></section>
+}
+
 function EditableEventCard({ proposal, onConfirmed }: { proposal: EventProposal; onConfirmed: (proposal: EventProposal) => void }) {
   const [title, setTitle] = useState(proposal.title)
   const [startsAt, setStartsAt] = useState(proposal.starts_at)
@@ -544,13 +603,13 @@ function isUsefulGroupName(name: string) {
   if (/^[\d\s.,:;№#/-]+$/.test(normalized)) return false
   return /[a-zа-яё]/i.test(normalized)
 }
-function sectionToEntityKind(section: ActiveSection): EntityKind | null { return section === "people" ? "person" : section === "companies" ? "company" : section === "projects" ? "project" : section === "finance" ? "finance" : null }
+function sectionToEntityKind(section: ActiveSection): EntityKind | null { return section === "people" ? "person" : section === "companies" ? "company" : section === "projects" ? "project" : section === "finance" ? "finance" : section === "cities" ? "city" : null }
 function entityTokens(name: string) { return name.toLowerCase().split(/\s+/).filter((part) => part.length > 3).slice(0, 4) }
 function shortName(name: string) { const parts = name.split(/\s+/).filter(Boolean); return parts.length >= 3 ? `${parts[0]} ${parts[1][0]}.${parts[2][0]}.` : name }
 function initials(name: string) { return name.split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]).join("").toUpperCase() || "AI" }
 function Avatar({ name, large = false }: { name: string; large?: boolean }) { return <span className={large ? "avatar large" : "avatar"}>{initials(name)}</span> }
-function entitySubtitle(kind: EntityKind) { return kind === "person" ? "Все физические лица, упомянутые в документах" : kind === "company" ? "Организации и контрагенты из документов" : kind === "project" ? "Проекты, связанные с документами" : "Финансовые сущности и обязательства" }
-function entitySearchPlaceholder(kind: EntityKind) { return kind === "person" ? "Поиск людей..." : kind === "company" ? "Поиск компаний..." : kind === "project" ? "Поиск проектов..." : "Поиск финансов..." }
-function entityKindTitle(kind: EntityKind) { return kind === "person" ? "Человек" : kind === "company" ? "Компания" : kind === "project" ? "Проект" : kind === "finance" ? "Финансы" : "AI-группа" }
+function entitySubtitle(kind: EntityKind) { return kind === "person" ? "Все физические лица, упомянутые в документах" : kind === "company" ? "Организации и контрагенты из документов" : kind === "project" ? "Проекты, связанные с документами" : kind === "city" ? "Города, найденные в документах" : "Финансовые сущности и обязательства" }
+function entitySearchPlaceholder(kind: EntityKind) { return kind === "person" ? "Поиск людей..." : kind === "company" ? "Поиск компаний..." : kind === "project" ? "Поиск проектов..." : kind === "city" ? "Поиск городов..." : "Поиск финансов..." }
+function entityKindTitle(kind: EntityKind) { return kind === "person" ? "Человек" : kind === "company" ? "Компания" : kind === "project" ? "Проект" : kind === "city" ? "Город" : "Финансы" }
 function fileTypeLabel(filename: string) { const ext = filename.split(".").pop()?.toLowerCase(); if (ext === "pdf") return "PDF"; if (["doc", "docx"].includes(ext ?? "")) return "Документ"; if (["xls", "xlsx"].includes(ext ?? "")) return "Таблица"; if (["ppt", "pptx"].includes(ext ?? "")) return "Презентация"; return "Файл" }
 function FileIcon({ filename }: { filename: string }) { const ext = filename.split(".").pop()?.toLowerCase(); if (["xls", "xlsx"].includes(ext ?? "")) return <FileSpreadsheet size={18} className="file-icon sheet" />; return <FileText size={18} className={ext === "pdf" ? "file-icon pdf" : "file-icon doc"} /> }
